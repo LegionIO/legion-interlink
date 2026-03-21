@@ -1,0 +1,10 @@
+node_modules/
+out/
+dist/
+*.map
+.DS_Store
+.env
+.env.*
+!.env.example
+pnpm-debug.log*
+*.tsbuildinfo

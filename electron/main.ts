@@ -1,0 +1,415 @@
+import { app, BrowserWindow, ipcMain, shell, Menu, nativeTheme, dialog, net, MenuItem, clipboard } from 'electron';
+import { join } from 'path';
+import { mkdirSync, existsSync, readFileSync, writeFileSync } from 'fs';
+import { homedir } from 'os';
+import { readEffectiveConfig, registerConfigHandlers } from './ipc/config.js';
+import { registerAgentHandlers, registerTools, updateMcpTools, updateSkillTools } from './ipc/agent.js';
+import { registerConversationHandlers } from './ipc/conversations.js';
+import { buildToolRegistry } from './tools/registry.js';
+import { registerAgentLatticeAuthHandlers } from './ipc/oauth.js';
+import { registerMcpHandlers } from './ipc/mcp.js';
+import { registerMemoryHandlers } from './ipc/memory.js';
+import { rebuildMcpTools } from './tools/mcp-client.js';
+import { loadSkillsAsTools } from './tools/skill-loader.js';
+import { registerSkillsHandlers } from './ipc/skills.js';
+import type { LegionConfig } from './config/schema.js';
+
+const LEGION_HOME = join(homedir(), '.legionio');
+
+// Set app name early so macOS menu bar and dock show "Legion Aithena" instead of "Electron"
+app.setName('Legion Aithena');
+
+function ensureLegionHome(): void {
+  const dirs = [
+    LEGION_HOME,
+    join(LEGION_HOME, 'data'),
+    join(LEGION_HOME, 'settings'),
+    join(LEGION_HOME, 'skills'),
+    join(LEGION_HOME, 'certs'),
+  ];
+  for (const dir of dirs) {
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true });
+    }
+  }
+}
+
+function applyTheme(): void {
+  try {
+    const config = readEffectiveConfig(LEGION_HOME);
+    const theme = config?.ui?.theme;
+    if (theme === 'dark') nativeTheme.themeSource = 'dark';
+    else if (theme === 'light') nativeTheme.themeSource = 'light';
+    else nativeTheme.themeSource = 'system';
+  } catch {
+    nativeTheme.themeSource = 'system';
+  }
+}
+
+function buildMenu(): void {
+  const template: Electron.MenuItemConstructorOptions[] = [
+    {
+      label: app.name,
+      submenu: [
+        { role: 'about' },
+        { type: 'separator' },
+        {
+          label: 'Settings…',
+          accelerator: 'Cmd+,',
+          click: () => {
+            const win = BrowserWindow.getFocusedWindow();
+            if (win) win.webContents.send('menu:open-settings');
+          },
+        },
+        { type: 'separator' },
+        { role: 'services' },
+        { type: 'separator' },
+        { role: 'hide' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit' },
+      ],
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' },
+        { type: 'separator' },
+        {
+          label: 'Find',
+          accelerator: 'Cmd+F',
+          click: () => {
+            const win = BrowserWindow.getFocusedWindow();
+            if (win) win.webContents.send('menu:find');
+          },
+        },
+      ],
+    },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+      ],
+    },
+    {
+      label: 'Window',
+      submenu: [
+        { role: 'minimize' },
+        { role: 'zoom', label: 'Maximize' },
+        { role: 'close' },
+        { type: 'separator' },
+        { role: 'front' },
+      ],
+    },
+  ];
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+// Resolve the app icon — works in both dev and packaged builds
+const APP_ICON = join(__dirname, '../../build/icon.png');
+const IS_MAC = process.platform === 'darwin';
+
+function createWindow(): BrowserWindow {
+  const mainWindow = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    minWidth: 800,
+    minHeight: 600,
+    show: false,
+    title: 'Legion Aithena',
+    icon: APP_ICON,
+    titleBarStyle: 'hiddenInset',
+    trafficLightPosition: { x: 15, y: 10 },
+    transparent: IS_MAC,
+    vibrancy: IS_MAC ? 'sidebar' : undefined,
+    visualEffectState: IS_MAC ? 'active' : undefined,
+    backgroundColor: IS_MAC ? '#00000000' : (nativeTheme.shouldUseDarkColors ? '#1a1a1a' : '#ffffff'),
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.mjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+      spellcheck: true,
+    },
+  });
+
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url);
+    return { action: 'deny' };
+  });
+
+  // Default right-click context menu
+  mainWindow.webContents.on('context-menu', (_event, params) => {
+    const menu = new Menu();
+
+    // Image context menu
+    if (params.mediaType === 'image' && params.srcURL) {
+      menu.append(new MenuItem({
+        label: 'Copy Image',
+        click: () => mainWindow.webContents.copyImageAt(params.x, params.y),
+      }));
+      menu.append(new MenuItem({
+        label: 'Copy Image URL',
+        click: () => clipboard.writeText(params.srcURL),
+      }));
+      menu.append(new MenuItem({
+        label: 'Save Image As\u2026',
+        click: async () => {
+          try {
+            const defaultName = params.srcURL.split('/').pop()?.split('?')[0] || 'image.png';
+            const result = await dialog.showSaveDialog(mainWindow, {
+              defaultPath: defaultName,
+              filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'] }],
+            });
+            if (!result.canceled && result.filePath) {
+              const resp = await net.fetch(params.srcURL);
+              if (resp.ok) {
+                const buffer = Buffer.from(await resp.arrayBuffer());
+                writeFileSync(result.filePath, buffer);
+              }
+            }
+          } catch { /* ignore save errors */ }
+        },
+      }));
+      if (params.selectionText) {
+        menu.append(new MenuItem({ type: 'separator' }));
+        menu.append(new MenuItem({ role: 'copy' }));
+      }
+    } else if (params.isEditable) {
+      // Spellcheck suggestions
+      if (params.misspelledWord) {
+        if (params.dictionarySuggestions.length > 0) {
+          for (const suggestion of params.dictionarySuggestions) {
+            menu.append(new MenuItem({
+              label: suggestion,
+              click: () => mainWindow.webContents.replaceMisspelling(suggestion),
+            }));
+          }
+        } else {
+          menu.append(new MenuItem({ label: 'No suggestions', enabled: false }));
+        }
+        menu.append(new MenuItem({ type: 'separator' }));
+        menu.append(new MenuItem({
+          label: 'Add to Dictionary',
+          click: () => mainWindow.webContents.session.addWordToSpellCheckerDictionary(params.misspelledWord),
+        }));
+        menu.append(new MenuItem({ type: 'separator' }));
+      }
+      // Editable field context menu
+      menu.append(new MenuItem({ role: 'undo' }));
+      menu.append(new MenuItem({ role: 'redo' }));
+      menu.append(new MenuItem({ type: 'separator' }));
+      menu.append(new MenuItem({ role: 'cut' }));
+      menu.append(new MenuItem({ role: 'copy' }));
+      menu.append(new MenuItem({ role: 'paste' }));
+      menu.append(new MenuItem({ type: 'separator' }));
+      menu.append(new MenuItem({ role: 'selectAll' }));
+    } else {
+      // Text selection context menu
+      if (params.selectionText) {
+        menu.append(new MenuItem({ role: 'copy' }));
+      }
+      menu.append(new MenuItem({ role: 'selectAll' }));
+    }
+
+    // Link items (appended to any menu type)
+    if (params.linkURL) {
+      menu.append(new MenuItem({ type: 'separator' }));
+      menu.append(new MenuItem({
+        label: 'Open Link',
+        click: () => shell.openExternal(params.linkURL),
+      }));
+      menu.append(new MenuItem({
+        label: 'Copy Link',
+        click: () => clipboard.writeText(params.linkURL),
+      }));
+    }
+
+    if (menu.items.length > 0) {
+      menu.popup({ window: mainWindow });
+    }
+  });
+
+  if (process.env.ELECTRON_RENDERER_URL) {
+    mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
+  } else {
+    mainWindow.loadFile(join(__dirname, '../renderer/index.html'));
+  }
+
+  mainWindow.once('ready-to-show', () => {
+    mainWindow.maximize();
+    mainWindow.show();
+  });
+
+  return mainWindow;
+}
+
+app.whenReady().then(() => {
+  ensureLegionHome();
+  applyTheme();
+  buildMenu();
+
+  // Set dock icon (macOS) — needed for dev mode since packager config doesn't apply
+  if (process.platform === 'darwin' && app.dock && existsSync(APP_ICON)) {
+    app.dock.setIcon(APP_ICON);
+  }
+
+  // Config reader (used by tools and OAuth)
+  const getConfig = () => readEffectiveConfig(LEGION_HOME);
+
+  // Track last mcpServers fingerprint to detect changes
+  let lastMcpFingerprint = JSON.stringify(getConfig().mcpServers ?? []);
+  let lastSkillsFingerprint = JSON.stringify(getConfig().skills?.enabled ?? []);
+
+  const handleConfigChanged = (config: LegionConfig) => {
+    // MCP hot-reload
+    const newMcpFp = JSON.stringify(config.mcpServers ?? []);
+    if (newMcpFp !== lastMcpFingerprint) {
+      lastMcpFingerprint = newMcpFp;
+      console.info('[Legion] MCP servers changed, rebuilding...');
+      rebuildMcpTools(config.mcpServers ?? []).then((mcpTools) => {
+        updateMcpTools(mcpTools);
+        console.info(`[Legion] MCP hot-reload complete: ${mcpTools.length} MCP tools`);
+      }).catch((err) => {
+        console.error('[Legion] MCP hot-reload failed:', err);
+      });
+    }
+
+    // Skills hot-reload
+    const newSkillsFp = JSON.stringify(config.skills?.enabled ?? []);
+    if (newSkillsFp !== lastSkillsFingerprint) {
+      lastSkillsFingerprint = newSkillsFp;
+      const skillsDir = config.skills?.directory || join(LEGION_HOME, 'skills');
+      const skillTools = loadSkillsAsTools(skillsDir, config.skills?.enabled ?? [], getConfig);
+      updateSkillTools(skillTools);
+      console.info(`[Legion] Skills hot-reload complete: ${skillTools.length} skill tools`);
+    }
+  };
+
+  // Register IPC handlers
+  registerConfigHandlers(ipcMain, LEGION_HOME, handleConfigChanged);
+  registerAgentHandlers(ipcMain, LEGION_HOME);
+  registerConversationHandlers(ipcMain, LEGION_HOME);
+  registerAgentLatticeAuthHandlers(ipcMain, LEGION_HOME, getConfig);
+  registerMcpHandlers(ipcMain);
+  registerMemoryHandlers(ipcMain, LEGION_HOME, getConfig);
+  registerSkillsHandlers(ipcMain, LEGION_HOME);
+
+  // File dialog handler
+  ipcMain.handle('dialog:open-file', async (_event, options?: { filters?: Array<{ name: string; extensions: string[] }> }) => {
+    const win = BrowserWindow.getFocusedWindow();
+    if (!win) return { canceled: true, filePaths: [] };
+    const result = await dialog.showOpenDialog(win, {
+      properties: ['openFile', 'multiSelections'],
+      filters: options?.filters ?? [
+        { name: 'All Files', extensions: ['*'] },
+        { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'] },
+        { name: 'Documents', extensions: ['pdf', 'txt', 'md', 'json', 'csv'] },
+      ],
+    });
+    if (result.canceled) return { canceled: true, filePaths: [] };
+
+    // Read files and return as base64 data URLs
+    const files = result.filePaths.map((filePath) => {
+      const data = readFileSync(filePath);
+      const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
+      const mimeTypes: Record<string, string> = {
+        png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+        webp: 'image/webp', svg: 'image/svg+xml', pdf: 'application/pdf',
+        txt: 'text/plain', md: 'text/markdown', json: 'application/json', csv: 'text/csv',
+      };
+      const mime = mimeTypes[ext] ?? 'application/octet-stream';
+      const isImage = mime.startsWith('image/');
+      return {
+        path: filePath,
+        name: filePath.split('/').pop() ?? filePath,
+        mime,
+        isImage,
+        size: data.length,
+        dataUrl: `data:${mime};base64,${data.toString('base64')}`,
+        // For text files, also include raw text
+        ...(mime.startsWith('text/') || mime === 'application/json'
+          ? { text: data.toString('utf-8') }
+          : {}),
+      };
+    });
+    return { canceled: false, files };
+  });
+
+  // Fetch image bytes from main process (bypasses CORS)
+  ipcMain.handle('image:fetch', async (_event, url: string) => {
+    try {
+      const resp = await net.fetch(url);
+      if (!resp.ok) return { error: `HTTP ${resp.status}` };
+      const buffer = Buffer.from(await resp.arrayBuffer());
+      const mime = resp.headers.get('content-type') || 'image/png';
+      return { data: buffer.toString('base64'), mime };
+    } catch (err) {
+      return { error: String(err) };
+    }
+  });
+
+  // Save image to disk via save dialog
+  ipcMain.handle('image:save', async (_event, url: string, suggestedName?: string) => {
+    const win = BrowserWindow.getFocusedWindow();
+    if (!win) return { canceled: true };
+
+    const ext = (suggestedName?.split('.').pop() ?? 'png').toLowerCase();
+    const result = await dialog.showSaveDialog(win, {
+      defaultPath: suggestedName || 'image.png',
+      filters: [
+        { name: 'Images', extensions: [ext, 'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+    });
+    if (result.canceled || !result.filePath) return { canceled: true };
+
+    try {
+      const resp = await net.fetch(url);
+      if (!resp.ok) return { error: `HTTP ${resp.status}` };
+      const buffer = Buffer.from(await resp.arrayBuffer());
+      writeFileSync(result.filePath, buffer);
+      return { canceled: false, filePath: result.filePath };
+    } catch (err) {
+      return { error: String(err) };
+    }
+  });
+
+  createWindow();
+
+  // Initialize tools asynchronously
+  buildToolRegistry(getConfig, LEGION_HOME).then((tools) => {
+    registerTools(tools);
+    console.info(`[Legion] ${tools.length} tools registered`);
+  }).catch((err) => {
+    console.error('[Legion] Failed to build tool registry:', err);
+  });
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow();
+    }
+  });
+});
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') {
+    app.quit();
+  }
+});

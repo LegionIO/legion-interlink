@@ -1,0 +1,309 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+}
+
+:root {
+  --radius: 0.85rem;
+  --background: oklch(0.975 0.008 292);
+  --foreground: oklch(0.28 0.03 292);
+  --card: oklch(0.995 0.003 292);
+  --card-foreground: oklch(0.28 0.03 292);
+  --popover: oklch(0.995 0.003 292);
+  --popover-foreground: oklch(0.28 0.03 292);
+  --primary: oklch(0.57 0.12 292);
+  --primary-foreground: oklch(0.985 0.003 292);
+  --secondary: oklch(0.94 0.012 292);
+  --secondary-foreground: oklch(0.33 0.025 292);
+  --muted: oklch(0.95 0.01 292);
+  --muted-foreground: oklch(0.53 0.02 292);
+  --accent: oklch(0.92 0.02 292);
+  --accent-foreground: oklch(0.31 0.026 292);
+  --destructive: oklch(0.63 0.22 21);
+  --border: oklch(0.84 0.02 292 / 72%);
+  --input: oklch(0.89 0.015 292 / 92%);
+  --ring: oklch(0.62 0.11 292 / 42%);
+  --sidebar: oklch(0.955 0.012 292);
+  --sidebar-foreground: oklch(0.28 0.03 292);
+  --sidebar-primary: oklch(0.57 0.12 292);
+  --sidebar-primary-foreground: oklch(0.985 0.003 292);
+  --sidebar-accent: oklch(0.92 0.018 292);
+  --sidebar-accent-foreground: oklch(0.31 0.026 292);
+  --sidebar-border: oklch(0.83 0.018 292 / 70%);
+  --legion-shell-glow: rgba(127, 119, 221, 0.16);
+  --legion-edge: rgba(127, 119, 221, 0.10);
+  --legion-panel: rgba(255, 255, 255, 0.82);
+  --legion-overlay: rgba(255, 255, 255, 0.58);
+  --legion-panel-shadow: 0 18px 50px rgba(88, 78, 156, 0.12);
+  --legion-chip-shadow: 0 8px 24px rgba(88, 78, 156, 0.10);
+  --legion-user-bubble: rgba(255, 255, 255, 0.82);
+  --legion-user-bubble-border: rgba(127, 119, 221, 0.14);
+  --legion-user-bubble-shadow: 0 12px 28px rgba(88, 78, 156, 0.10);
+  --legion-file-chip: rgba(255, 255, 255, 0.78);
+  --legion-file-chip-hover: rgba(255, 255, 255, 0.94);
+  --legion-active-item: rgba(127, 119, 221, 0.12);
+  --legion-active-item-ring: rgba(127, 119, 221, 0.18);
+  --legion-matrix-fade: rgba(252, 251, 255, 0.22);
+  --legion-matrix-glyph: rgba(127, 119, 221, 0.45);
+}
+
+.dark {
+  --background: oklch(0.15 0.02 292);
+  --foreground: oklch(0.95 0.015 290);
+  --card: oklch(0.19 0.02 292);
+  --card-foreground: oklch(0.95 0.015 290);
+  --popover: oklch(0.19 0.02 292);
+  --popover-foreground: oklch(0.95 0.015 290);
+  --primary: oklch(0.84 0.085 292);
+  --primary-foreground: oklch(0.18 0.02 292);
+  --secondary: oklch(0.22 0.018 292);
+  --secondary-foreground: oklch(0.95 0.015 290);
+  --muted: oklch(0.21 0.016 292);
+  --muted-foreground: oklch(0.73 0.02 292);
+  --accent: oklch(0.25 0.022 292);
+  --accent-foreground: oklch(0.97 0.01 290);
+  --destructive: oklch(0.69 0.20 21);
+  --border: oklch(0.33 0.028 292 / 34%);
+  --input: oklch(0.28 0.02 292 / 40%);
+  --ring: oklch(0.81 0.08 292 / 45%);
+  --sidebar: oklch(0.145 0.018 292);
+  --sidebar-foreground: oklch(0.95 0.015 290);
+  --sidebar-primary: oklch(0.84 0.085 292);
+  --sidebar-primary-foreground: oklch(0.18 0.02 292);
+  --sidebar-accent: oklch(0.20 0.018 292);
+  --sidebar-accent-foreground: oklch(0.97 0.01 290);
+  --sidebar-border: oklch(0.31 0.025 292 / 34%);
+  --legion-shell-glow: rgba(127, 119, 221, 0.14);
+  --legion-edge: rgba(197, 194, 245, 0.08);
+  --legion-panel: rgba(255, 255, 255, 0.02);
+  --legion-overlay: rgba(14, 12, 26, 0.48);
+  --legion-panel-shadow: 0 18px 50px rgba(5, 4, 15, 0.22);
+  --legion-chip-shadow: 0 8px 24px rgba(5, 4, 15, 0.18);
+  --legion-user-bubble: rgba(255, 255, 255, 0.085);
+  --legion-user-bubble-border: rgba(255, 255, 255, 0.10);
+  --legion-user-bubble-shadow: 0 12px 28px rgba(5, 4, 15, 0.18);
+  --legion-file-chip: rgba(255, 255, 255, 0.10);
+  --legion-file-chip-hover: rgba(255, 255, 255, 0.15);
+  --legion-active-item: rgba(255, 255, 255, 0.08);
+  --legion-active-item-ring: rgba(197, 194, 245, 0.14);
+  --legion-matrix-fade: rgba(10, 8, 18, 0.08);
+  --legion-matrix-glyph: rgba(197, 194, 245, 0.70);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  a[href],
+  summary,
+  select:not(:disabled),
+  input[type="checkbox"]:not(:disabled),
+  input[type="radio"]:not(:disabled),
+  input[type="range"]:not(:disabled),
+  label[for] {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  [role="button"][aria-disabled="true"],
+  select:disabled,
+  input:disabled {
+    cursor: not-allowed;
+  }
+
+  body {
+    @apply text-foreground;
+    background-color: var(--background);
+    background-image:
+      radial-gradient(circle at top, var(--legion-shell-glow), transparent 34%),
+      linear-gradient(180deg, var(--legion-overlay), transparent 24%);
+    background-attachment: fixed;
+    font-feature-settings: "ss01" 1, "cv02" 1, "cv03" 1;
+  }
+
+  html,
+  #root {
+    background: transparent;
+  }
+}
+
+/* Electron draggable title bar region */
+.titlebar-drag {
+  -webkit-app-region: drag;
+}
+.titlebar-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* Content part dividers for multi-part assistant messages.
+   The assistant message bubble wraps MessagePrimitive.Content which renders
+   parts as adjacent sibling elements. Target the bg-muted container's children. */
+.aui-assistant-content > * + * {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid oklch(0.5 0 0 / 12%);
+}
+
+.dark .aui-assistant-content > * + * {
+  border-top-color: oklch(0.5 0 0 / 18%);
+}
+
+/* Typing dots inside assistant bubble: hide once real content parts are rendered.
+   The dots div is always the last child. If a sibling before it exists (a content part),
+   hide the dots. The :only-child case means no content parts → show dots. */
+.aui-assistant-content .aui-typing-dots {
+  display: block;
+}
+.aui-assistant-content > :not(.aui-typing-dots) ~ .aui-typing-dots {
+  display: none;
+}
+
+/* (Legion system prompt uses contentEditable — no overlay CSS needed) */
+
+/* contentEditable placeholder — data-placeholder attr is only set when isEmpty.
+   ::before renders inline at cursor position, no offset issues. */
+.legion-ce-placeholder[data-placeholder]::before {
+  content: attr(data-placeholder);
+  color: var(--muted-foreground);
+  pointer-events: none;
+}
+
+.legion-ce-placeholder[data-placeholder]:focus::before {
+  content: '';
+}
+
+/* Animated gradient text for "Legion" branding */
+.legion-gradient-text {
+  background:
+    linear-gradient(115deg, rgba(233,229,255,0.95) 0%, rgba(197,194,245,0.96) 35%, rgba(244,242,255,0.98) 50%, rgba(160,154,232,0.94) 75%, rgba(127,119,221,0.9) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow: 0 0 16px rgba(160, 154, 232, 0.12);
+}
+
+html:not(.dark) .legion-gradient-text {
+  background:
+    linear-gradient(115deg, rgba(147, 138, 229, 0.92) 0%, rgba(121, 110, 214, 0.95) 32%, rgba(184, 176, 244, 0.88) 50%, rgba(113, 103, 210, 0.95) 72%, rgba(102, 91, 199, 0.94) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-stroke: 0.35px rgba(98, 88, 190, 0.18);
+  text-shadow:
+    0 0 12px rgba(160, 154, 232, 0.10),
+    0 1px 0 rgba(255, 255, 255, 0.38);
+}
+
+.legion-wordmark {
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.legion-shell-panel {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.35), rgba(255,255,255,0.08)),
+    linear-gradient(180deg, var(--legion-panel), color-mix(in oklab, var(--background) 92%, transparent));
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.05),
+    var(--legion-panel-shadow);
+  backdrop-filter: blur(22px) saturate(120%);
+}
+
+.dark .legion-shell-panel {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.055), rgba(255,255,255,0.012)),
+    linear-gradient(180deg, rgba(22, 18, 39, 0.38), rgba(18, 15, 32, 0.26));
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.05),
+    0 8px 24px rgba(5, 4, 15, 0.2);
+}
+
+.legion-edge {
+  box-shadow: inset 0 0 0 1px var(--legion-edge);
+}
+
+.legion-chip {
+  border-radius: 1rem;
+  background: linear-gradient(180deg, rgba(255,255,255,0.22), rgba(255,255,255,0.08));
+  box-shadow:
+    inset 0 0 0 1px rgba(197, 194, 245, 0.12),
+    var(--legion-chip-shadow);
+}
+
+/* Shiki dark mode support */
+.dark .shiki,
+.dark .shiki span {
+  color: var(--shiki-dark) !important;
+  background-color: var(--shiki-dark-bg) !important;
+  font-style: var(--shiki-dark-font-style) !important;
+  font-weight: var(--shiki-dark-font-weight) !important;
+  text-decoration: var(--shiki-dark-text-decoration) !important;
+}
+
+/* Search highlights */
+.search-highlight {
+  background-color: oklch(0.85 0.15 85); /* yellow */
+  color: oklch(0.2 0 0);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+.dark .search-highlight {
+  background-color: oklch(0.55 0.15 85);
+  color: oklch(0.95 0 0);
+}
+.search-highlight-active {
+  background-color: oklch(0.7 0.2 30); /* orange */
+  color: white;
+}
+.dark .search-highlight-active {
+  background-color: oklch(0.6 0.2 30);
+}
+
+.legion-settings-select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%239d98be' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-position: right 1rem center;
+  background-repeat: no-repeat;
+  background-size: 0.75rem 0.5rem;
+  padding-right: 2.9rem;
+}
+
+.legion-settings-select::-ms-expand {
+  display: none;
+}

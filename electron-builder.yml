@@ -1,0 +1,21 @@
+appId: com.legion.aithena
+productName: Legion Aithena
+executableName: Legion Aithena
+directories:
+  buildResources: build
+  output: dist
+files:
+  - out/**/*
+  - "!**/*.map"
+icon: build/icon.icns
+mac:
+  category: public.app-category.developer-tools
+  extendInfo:
+    CFBundleDisplayName: Legion Aithena
+    CFBundleName: Legion Aithena
+  target:
+    - target: dir
+      arch:
+        - arm64
+        - x64
+  identity: null

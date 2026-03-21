@@ -1,0 +1,285 @@
+import { useEffect, useMemo, useRef, useState, type FC } from 'react';
+import { highlightBrandText } from '@/components/BrandText';
+import { CodeBlock } from './CodeBlock';
+import {
+  ChevronDownIcon,
+  ChevronRightIcon,
+  CheckCircle2Icon,
+  AlertCircleIcon,
+  LoaderIcon,
+} from 'lucide-react';
+
+type ToolCallPart = {
+  type: 'tool-call';
+  toolCallId: string;
+  toolName: string;
+  args: unknown;
+  argsText?: string;
+  result?: unknown;
+  isError?: boolean;
+  startedAt?: string;
+  finishedAt?: string;
+  liveOutput?: {
+    stdout?: string;
+    stderr?: string;
+    truncated?: boolean;
+    stopped?: boolean;
+  };
+};
+
+export const ToolGroup: FC<{ parts: ToolCallPart[] }> = ({ parts }) => {
+  if (parts.length === 0) return null;
+
+  return (
+    <div className="my-2 space-y-1.5">
+      {parts.map((part) => (
+        <ToolCallDisplay key={part.toolCallId} part={part} />
+      ))}
+    </div>
+  );
+};
+
+export const ToolCallDisplay: FC<{ part: ToolCallPart }> = ({ part }) => {
+  const [expanded, setExpanded] = useState(false);
+  const hasResult = part.result !== undefined;
+  const isError = part.isError || (hasResult && isErrorResult(part.result));
+  const isRunning = !hasResult;
+  const hasLiveOutput = Boolean(part.liveOutput?.stdout || part.liveOutput?.stderr);
+
+  return (
+    <div className="rounded-lg border bg-card text-sm overflow-hidden">
+      {/* Header */}
+      <button
+        type="button"
+        className="flex w-full items-center gap-2 px-3 py-2 hover:bg-muted/50 transition-colors"
+        onClick={() => setExpanded(!expanded)}
+      >
+        {expanded ? (
+          <ChevronDownIcon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+        ) : (
+          <ChevronRightIcon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+        )}
+        <StatusBadge isRunning={isRunning} isError={isError} />
+        <span className="font-mono text-xs font-semibold truncate">{highlightBrandText(part.toolName)}</span>
+        <span className="text-[10px] text-muted-foreground ml-1 truncate">
+          {highlightBrandText(getToolSummary(part))}
+        </span>
+        <ToolElapsedBadge
+          isRunning={isRunning}
+          isError={Boolean(isError)}
+          startedAt={part.startedAt}
+          finishedAt={part.finishedAt}
+        />
+        <ToolStatusIcon isRunning={isRunning} isError={isError} />
+      </button>
+
+      {/* Expanded detail */}
+      {expanded && (
+        <div className="border-t">
+          {/* Arguments section */}
+          <ToolSection title="Arguments" defaultOpen>
+            <CodeBlock code={formatArgs(part.args)} language="json" />
+          </ToolSection>
+
+          {/* Pre-extraction / In-progress indicator */}
+          {isRunning && (
+            <div className="px-3 py-2 border-t bg-blue-500/5">
+              <div className="flex items-center gap-2">
+                <LoaderIcon className="h-3.5 w-3.5 animate-spin text-blue-500" />
+                <span className="text-xs text-blue-600 dark:text-blue-400">Executing tool...</span>
+              </div>
+            </div>
+          )}
+
+          {hasLiveOutput && (
+            <ToolSection title="Live Output" defaultOpen={isRunning}>
+              <CodeBlock code={formatLiveOutput(part.liveOutput)} language="text" />
+            </ToolSection>
+          )}
+
+          {/* Result section */}
+          {hasResult && (
+            <ToolSection title={isError ? 'Error' : 'Result'} defaultOpen>
+              <CodeBlock
+                code={formatResult(part.result)}
+                language="json"
+                isError={isError}
+              />
+            </ToolSection>
+          )}
+
+          {/* Metadata */}
+          <div className="px-3 py-1.5 border-t bg-muted/30 flex items-center gap-3 text-[10px] text-muted-foreground">
+            <span>ID: {part.toolCallId?.slice(0, 12)}...</span>
+            {hasResult && <span>{isError ? 'Failed' : 'Completed'}</span>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const StatusBadge: FC<{ isRunning: boolean; isError: boolean }> = ({ isRunning, isError }) => {
+  if (isRunning) {
+    return <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-500/10 text-blue-600 dark:text-blue-400">RUNNING</span>;
+  }
+  if (isError) {
+    return <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-destructive/10 text-destructive">ERROR</span>;
+  }
+  return <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-500/10 text-green-600 dark:text-green-400">DONE</span>;
+};
+
+const ToolStatusIcon: FC<{ isRunning: boolean; isError: boolean }> = ({ isRunning, isError }) => {
+  if (isRunning) {
+    return <LoaderIcon className="h-3.5 w-3.5 animate-spin text-blue-500 shrink-0" />;
+  }
+  if (isError) {
+    return <AlertCircleIcon className="h-3.5 w-3.5 text-destructive shrink-0" />;
+  }
+  return <CheckCircle2Icon className="h-3.5 w-3.5 text-green-500 shrink-0" />;
+};
+
+const ToolElapsedBadge: FC<{
+  isRunning: boolean;
+  isError: boolean;
+  startedAt?: string;
+  finishedAt?: string;
+}> = ({ isRunning, isError, startedAt, finishedAt }) => {
+  const fallbackStartedMsRef = useRef<number>(Date.now());
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  const [frozenEndMs, setFrozenEndMs] = useState<number | null>(null);
+
+  const startedMs = useMemo(
+    () => parseTimestampMs(startedAt) ?? fallbackStartedMsRef.current,
+    [startedAt],
+  );
+  const finishedMs = useMemo(() => parseTimestampMs(finishedAt), [finishedAt]);
+
+  useEffect(() => {
+    if (isRunning) {
+      setFrozenEndMs(null);
+      const tick = () => setNowMs(Date.now());
+      tick();
+      const interval = window.setInterval(tick, 100);
+      return () => window.clearInterval(interval);
+    }
+    if (finishedMs == null && frozenEndMs == null) {
+      setFrozenEndMs(Date.now());
+    }
+    return undefined;
+  }, [isRunning, finishedMs, frozenEndMs]);
+
+  const endMs = finishedMs ?? frozenEndMs ?? nowMs;
+  const elapsedMs = Math.max(0, endMs - startedMs);
+  const colorClasses = isRunning
+    ? 'border-blue-500/20 bg-blue-500/10 text-blue-600 dark:text-blue-400'
+    : isError
+      ? 'border-destructive/20 bg-destructive/10 text-destructive'
+      : 'border-green-500/20 bg-green-500/10 text-green-600 dark:text-green-400';
+
+  return (
+    <span className={`ml-auto rounded-full border px-2 py-0.5 text-[10px] font-semibold tabular-nums ${colorClasses}`}>
+      {formatElapsed(elapsedMs)}
+    </span>
+  );
+};
+
+const ToolSection: FC<{ title: string; defaultOpen?: boolean; children: React.ReactNode }> = ({ title, defaultOpen = false, children }) => {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="border-t">
+      <button
+        type="button"
+        className="flex w-full items-center gap-1.5 px-3 py-1.5 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider hover:bg-muted/30"
+        onClick={() => setOpen(!open)}
+      >
+        {open ? <ChevronDownIcon className="h-2.5 w-2.5" /> : <ChevronRightIcon className="h-2.5 w-2.5" />}
+        {title}
+      </button>
+      {open && <div className="px-3 pb-2">{children}</div>}
+    </div>
+  );
+};
+
+/* CodeBlock imported from ./CodeBlock */
+
+function isErrorResult(result: unknown): boolean {
+  if (!result || typeof result !== 'object') return false;
+  const r = result as Record<string, unknown>;
+  return Boolean(r.error) || r.isError === true || (r.exitCode !== undefined && r.exitCode !== 0);
+}
+
+function getToolSummary(part: ToolCallPart): string {
+  const args = part.args as Record<string, unknown>;
+  if (part.toolName === 'sh' && args.command) return String(args.command).slice(0, 60);
+  if (part.toolName === 'file_read' && args.path) return String(args.path).split('/').pop() ?? '';
+  if (part.toolName === 'file_write' && args.path) return String(args.path).split('/').pop() ?? '';
+  if (part.toolName === 'file_edit' && args.path) return String(args.path).split('/').pop() ?? '';
+  if (part.toolName === 'grep' && args.pattern) return `/${args.pattern}/`;
+  if (part.toolName === 'glob' && args.pattern) return String(args.pattern);
+  if (part.toolName === 'list_directory' && args.path) return String(args.path);
+  if (part.toolName === 'agent_lattice_chat') return 'Remote agent call';
+  return '';
+}
+
+function formatArgs(args: unknown): string {
+  try {
+    return JSON.stringify(args, null, 2);
+  } catch {
+    return String(args);
+  }
+}
+
+function formatResult(result: unknown): string {
+  const sanitized = sanitizeResultForDisplay(result);
+  if (typeof sanitized === 'string') return sanitized;
+  try {
+    return JSON.stringify(sanitized, null, 2);
+  } catch {
+    return String(sanitized);
+  }
+}
+
+function sanitizeResultForDisplay(result: unknown): unknown {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return result;
+  const record = result as Record<string, unknown>;
+  const internalKeys = new Set(['observer', 'modelStream']);
+  const visibleEntries = Object.entries(record).filter(([key]) => !internalKeys.has(key));
+  const visible = Object.fromEntries(visibleEntries);
+
+  // Observer augmentation may wrap primitive results as { value, observer }.
+  if ('value' in visible && Object.keys(visible).length === 1) {
+    return visible.value;
+  }
+
+  return visible;
+}
+
+function formatLiveOutput(output?: { stdout?: string; stderr?: string; truncated?: boolean; stopped?: boolean }): string {
+  if (!output) return '';
+  const chunks: string[] = [];
+  if (output.stdout) chunks.push(`STDOUT\n${output.stdout}`);
+  if (output.stderr) chunks.push(`STDERR\n${output.stderr}`);
+  if (output.truncated) chunks.push('[output truncated]');
+  if (output.stopped) chunks.push('[streaming stopped at max output]');
+  return chunks.join('\n\n') || '[no output yet]';
+}
+
+function parseTimestampMs(value?: string): number | null {
+  if (!value) return null;
+  const ms = Date.parse(value);
+  return Number.isNaN(ms) ? null : ms;
+}
+
+function formatElapsed(ms: number): string {
+  if (ms < 1000) return `${Math.floor(ms)}ms`;
+
+  const totalSeconds = Math.floor(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) return `${hours}h${minutes}m${seconds}s`;
+  if (minutes > 0) return `${minutes}m${seconds}s`;
+  return `${seconds}s`;
+}
