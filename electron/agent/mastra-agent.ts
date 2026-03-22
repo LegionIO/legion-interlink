@@ -240,6 +240,7 @@ async function* generateWithSyntheticEvents(
 ): AsyncGenerator<StreamEvent> {
   // Events are queued from the onStepFinish callback and drained after generate completes
   const eventQueue: StreamEvent[] = [];
+  let terminalFinishReason: string | undefined;
 
   try {
     const msgArr = messages as Array<{ role?: string }>;
@@ -299,7 +300,7 @@ async function* generateWithSyntheticEvents(
     }
 
     // Emit the final text as a single text-delta
-    const fullResult = result as { text?: string };
+    const fullResult = result as { text?: string; finishReason?: string | { unified?: string } };
     if (fullResult.text) {
       yield {
         conversationId,
@@ -307,6 +308,9 @@ async function* generateWithSyntheticEvents(
         text: fullResult.text,
       };
     }
+    terminalFinishReason = typeof fullResult.finishReason === 'string'
+      ? fullResult.finishReason
+      : fullResult.finishReason?.unified;
 
     console.info(`[Agent] Generate completed for ${conversationId}`);
   } catch (error) {
@@ -325,7 +329,11 @@ async function* generateWithSyntheticEvents(
     }
   }
 
-  yield { conversationId, type: 'done' };
+  yield {
+    conversationId,
+    type: 'done',
+    ...(terminalFinishReason ? { data: { finishReason: terminalFinishReason } } : {}),
+  };
 }
 
 /**
@@ -347,6 +355,7 @@ async function* streamWithRealEvents(
   const toolStartByCallId = new Map<string, { startedAt: string; toolName: string }>();
   let emittedAnyOutput = false;
   let emittedTerminalError = false;
+  let terminalFinishReason: string | undefined;
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
@@ -436,6 +445,9 @@ async function* streamWithRealEvents(
           };
         } else if (type === 'finish') {
           const stepResult = payload?.stepResult as { reason?: string } | undefined;
+          if (stepResult?.reason) {
+            terminalFinishReason = stepResult.reason;
+          }
           if (stepResult?.reason === 'error' && !emittedTerminalError && !options?.abortSignal?.aborted) {
             emittedTerminalError = true;
             yield {
@@ -443,6 +455,14 @@ async function* streamWithRealEvents(
               type: 'error',
               error: 'The model ended the stream with an error.',
             };
+          }
+        } else if (type === 'step-finish') {
+          const stepResult = payload?.stepResult as { reason?: string } | undefined;
+          if (stepResult?.reason === 'content-filter') {
+            terminalFinishReason = stepResult.reason;
+            // Filtered completions already produced their refusal text; continuing only burns more steps.
+            console.info(`[Agent] Ending stream early for ${conversationId} after content-filter step finish`);
+            break;
           }
         } else if (type) {
           console.info(`[Agent] Unknown stream event type: ${type}`, payload);
@@ -487,13 +507,17 @@ async function* streamWithRealEvents(
     }
   }
 
-  yield { conversationId, type: 'done' };
+  yield {
+    conversationId,
+    type: 'done',
+    ...(terminalFinishReason ? { data: { finishReason: terminalFinishReason } } : {}),
+  };
 }
 
 /**
  * Fallback-aware streaming wrapper.
  * Tries the primary model first, then each fallback in order.
- * Fallback only triggers if no content (text-delta, tool-call) has been emitted yet.
+ * Fallback triggers on pre-content errors, and also on terminal content filters.
  */
 export async function* streamWithFallback(
   conversationId: string,
@@ -536,6 +560,9 @@ export async function* streamWithFallback(
 
     let emittedContent = false;
     let lastError: string | null = null;
+    let terminalFinishReason: string | null = null;
+    let fallbackReason: 'content-filter' | null = null;
+    let discardPartialAssistant = false;
 
     try {
       console.info(`[Fallback] Attempt ${attempt + 1}/${modelChain.length}: model=${entry.modelConfig.modelName} key=${entry.key}`);
@@ -562,12 +589,42 @@ export async function* streamWithFallback(
           continue; // don't yield the error to the UI
         }
 
+        if (event.type === 'done') {
+          const doneData = event.data as { finishReason?: string } | undefined;
+          terminalFinishReason = doneData?.finishReason ?? null;
+
+          if (terminalFinishReason === 'content-filter' && attempt < modelChain.length - 1) {
+            fallbackReason = 'content-filter';
+            discardPartialAssistant = emittedContent;
+            break;
+          }
+        }
+
         // Skip inner 'done' if we're about to fallback
         if (event.type === 'done' && lastError && !emittedContent && attempt < modelChain.length - 1) {
           break;
         }
 
         yield event;
+      }
+
+      if (fallbackReason === 'content-filter') {
+        const nextEntry = modelChain[attempt + 1];
+        yield {
+          conversationId,
+          type: 'model-fallback',
+          data: {
+            fromModel: entry.displayName,
+            fromModelKey: entry.key,
+            toModel: nextEntry.displayName,
+            toModelKey: nextEntry.key,
+            error: 'content filter',
+            reason: fallbackReason,
+            discardPartialAssistant,
+            attempt: attempt + 1,
+          },
+        };
+        continue;
       }
 
       // If content was emitted successfully or no error occurred, we're done

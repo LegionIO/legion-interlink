@@ -392,6 +392,14 @@ function applyError(acc: { messages: StoredMessage[]; headId: string | null }, e
   acc.messages[idx] = { ...msg, content: toStoredContent(content) };
 }
 
+function discardTrailingAssistant(acc: { messages: StoredMessage[]; headId: string | null }): void {
+  const branch = getActiveBranch(acc.messages, acc.headId);
+  const last = branch[branch.length - 1];
+  if (last?.role !== 'assistant') return;
+  acc.messages = acc.messages.filter((m) => m.id !== last.id);
+  acc.headId = last.parentId ?? null;
+}
+
 // --- Persistence ---
 
 async function persistConversation(
@@ -533,6 +541,7 @@ type FallbackBannerState = {
   fromModel: string;
   toModel: string;
   error: string;
+  reason?: string;
 } | null;
 
 type FallbackBannerActions = {
@@ -830,9 +839,23 @@ export function RuntimeProvider({
           data: e.data as { stream?: 'stdout' | 'stderr'; output?: string; truncated?: boolean; stopped?: boolean } | undefined,
         });
       } else if (e.type === 'model-fallback') {
-        const fbData = e.data as { fromModel: string; toModel: string; error: string } | undefined;
+        const fbData = e.data as {
+          fromModel: string;
+          toModel: string;
+          error: string;
+          reason?: string;
+          discardPartialAssistant?: boolean;
+        } | undefined;
+        if (fbData?.discardPartialAssistant) {
+          discardTrailingAssistant(acc);
+        }
         if (fbData && isActiveConv) {
-          setFallbackBanner({ fromModel: fbData.fromModel, toModel: fbData.toModel, error: fbData.error });
+          setFallbackBanner({
+            fromModel: fbData.fromModel,
+            toModel: fbData.toModel,
+            error: fbData.error,
+            reason: fbData.reason,
+          });
           if (fallbackBannerTimerRef.current) clearTimeout(fallbackBannerTimerRef.current);
           fallbackBannerTimerRef.current = setTimeout(() => setFallbackBanner(null), 8000);
         }

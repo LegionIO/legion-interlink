@@ -11,7 +11,11 @@ export const FallbackBanner: FC = () => {
       <AlertTriangleIcon className="h-4 w-4 shrink-0 text-amber-400" />
       <span className="flex-1">
         Switched from <strong>{banner.fromModel}</strong> to <strong>{banner.toModel}</strong>
-        {banner.error && <span className="text-amber-300/70"> &mdash; {banner.error}</span>}
+        {banner.reason === 'content-filter'
+          ? <span className="text-amber-300/70"> because the prior response was content filtered</span>
+          : banner.error
+            ? <span className="text-amber-300/70"> because of {banner.error}</span>
+            : null}
       </span>
       <button type="button" onClick={dismiss} className="p-0.5 rounded hover:bg-amber-500/20 transition-colors">
         <XIcon className="h-3.5 w-3.5" />
