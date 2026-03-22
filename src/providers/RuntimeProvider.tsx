@@ -848,6 +848,18 @@ export function RuntimeProvider({
           setHeadId(acc.headId);
         }
         return;
+      } else if (e.type === 'done') {
+        if (persistTimerRef.current) { clearTimeout(persistTimerRef.current); persistTimerRef.current = null; }
+        streamAccumulators.delete(convId);
+        persistConversation(convId, acc.messages, acc.headId, {
+          runStatus: 'idle', lastAssistantUpdateAt: nowIso(), hasUnread: !isActiveConv,
+        });
+        if (isActiveConv) {
+          setIsRunning(false);
+          setTree([...acc.messages]);
+          setHeadId(acc.headId);
+        }
+        return;
       }
 
       if (isActiveConv) {
