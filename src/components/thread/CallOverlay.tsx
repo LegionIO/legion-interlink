@@ -158,6 +158,8 @@ export const CallOverlay: FC = () => {
 
   const selectedInputDeviceId = realtimeConfig?.inputDeviceId;
   const selectedOutputDeviceId = realtimeConfig?.outputDeviceId;
+  const inputLevels = { [selectedInputDeviceId ?? 'default']: inputLevel };
+  const outputLevels = { [selectedOutputDeviceId ?? 'default']: outputLevel };
 
   // Load devices on mount
   useEffect(() => {
@@ -218,7 +220,7 @@ export const CallOverlay: FC = () => {
               icon={<MicIcon className="h-3 w-3" />}
               devices={inputDevices}
               selectedDeviceId={selectedInputDeviceId}
-              levels={{}}
+              levels={inputLevels}
               onSelect={handleSelectInput}
             />
             <DevicePicker
@@ -226,7 +228,7 @@ export const CallOverlay: FC = () => {
               icon={<Volume2Icon className="h-3 w-3" />}
               devices={outputDevices}
               selectedDeviceId={selectedOutputDeviceId}
-              levels={{}}
+              levels={outputLevels}
               onSelect={handleSelectOutput}
             />
           </div>
