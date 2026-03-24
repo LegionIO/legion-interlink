@@ -36,6 +36,41 @@ function normalizeOpenAIBaseUrl(endpoint?: string): string | undefined {
   return stripTrailingSlashes(parsed.toString());
 }
 
+function createTemperatureOmissionFetch(): typeof fetch {
+  return async (input, init) => {
+    const headers = new Headers(init?.headers);
+    if (headers.get('x-skynet-omit-temperature') !== '1') {
+      return fetch(input, init);
+    }
+
+    headers.delete('x-skynet-omit-temperature');
+
+    if (typeof init?.body !== 'string') {
+      return fetch(input, {
+        ...init,
+        headers,
+      });
+    }
+
+    try {
+      const parsed = JSON.parse(init.body) as Record<string, unknown>;
+      if (parsed && typeof parsed === 'object' && 'temperature' in parsed) {
+        delete parsed.temperature;
+      }
+      return fetch(input, {
+        ...init,
+        headers,
+        body: JSON.stringify(parsed),
+      });
+    } catch {
+      return fetch(input, {
+        ...init,
+        headers,
+      });
+    }
+  };
+}
+
 function createAwsCredentialProvider(profile?: string) {
   const provider = defaultProvider({
     ...(profile ? { profile } : {}),
@@ -100,6 +135,7 @@ export async function createLanguageModelFromConfig(modelConfig: LLMModelConfig)
       baseURL: stripTrailingSlashes(modelConfig.endpoint),
       ...(modelConfig.apiKey ? { apiKey: modelConfig.apiKey } : {}),
       ...(modelConfig.extraHeaders ? { headers: modelConfig.extraHeaders } : {}),
+      fetch: createTemperatureOmissionFetch(),
     });
     return anthropic(modelConfig.modelName);
   }

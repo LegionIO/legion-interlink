@@ -1,5 +1,7 @@
 import { Agent } from '@mastra/core/agent';
 import { createTool } from '@mastra/core/tools';
+import { toStandardSchema as toJsonStandardSchema } from '@mastra/schema-compat/adapters/json-schema';
+import zodToJsonSchema from 'zod-to-json-schema';
 import type { LegionConfig } from '../config/schema.js';
 import type { LLMModelConfig, ResolvedStreamConfig, ModelCatalogEntry, ReasoningEffort } from './model-catalog.js';
 import { createLanguageModelFromConfig } from './language-model.js';
@@ -55,6 +57,60 @@ function isRetryableBedrock503(error: unknown, modelConfig: LLMModelConfig): boo
     && errType.includes('ServiceUnavailableException');
 }
 
+function shouldRetryWithoutTemperature(
+  error: unknown,
+  modelSettings: Record<string, unknown>,
+  emittedAnyOutput: boolean,
+): boolean {
+  if (emittedAnyOutput) return false;
+  if (typeof modelSettings.temperature !== 'number') return false;
+
+  const messageParts: string[] = [];
+  if (error instanceof Error && error.message) {
+    messageParts.push(error.message);
+  }
+  if (typeof error === 'string') {
+    messageParts.push(error);
+  } else if (error && typeof error === 'object') {
+    const maybe = error as { data?: { message?: string }; responseBody?: string; message?: string };
+    if (typeof maybe.data?.message === 'string') messageParts.push(maybe.data.message);
+    if (typeof maybe.responseBody === 'string') messageParts.push(maybe.responseBody);
+    if (typeof maybe.message === 'string') messageParts.push(maybe.message);
+  }
+
+  const message = messageParts.join('\n').toLowerCase();
+  if (!message.includes('temperature')) return false;
+
+  return /unsupported parameter:\s*'temperature'/.test(message)
+    || message.includes('temperature is not supported')
+    || /only (?:the )?default \(1\) value is supported/.test(message);
+}
+
+function omitTemperature(modelSettings: Record<string, unknown>): Record<string, unknown> {
+  const next = { ...modelSettings };
+  delete next.temperature;
+  return next;
+}
+
+function withTemperatureOmissionHeader(modelConfig: LLMModelConfig): LLMModelConfig {
+  return {
+    ...modelConfig,
+    extraHeaders: {
+      ...(modelConfig.extraHeaders ?? {}),
+      'x-skynet-omit-temperature': '1',
+    },
+  };
+}
+
+function toMastraInputSchema(inputSchema: ToolDefinition['inputSchema']) {
+  const jsonSchema = zodToJsonSchema(inputSchema, {
+    $refStrategy: 'none',
+    target: 'jsonSchema7',
+  });
+
+  return toJsonStandardSchema(jsonSchema as any);
+}
+
 function toMastraTools(
   conversationId: string,
   tools: ToolDefinition[],
@@ -75,7 +131,7 @@ function toMastraTools(
     result[tool.name] = createTool({
       id: tool.name,
       description: tool.description,
-      inputSchema: tool.inputSchema,
+      inputSchema: toMastraInputSchema(tool.inputSchema),
       execute: async (input, options) => {
         const toolCallId = typeof (options as any)?.toolCallId === 'string' ? (options as any).toolCallId : `tc-${Date.now()}`;
         const localAbortController = new AbortController();
@@ -154,18 +210,20 @@ function buildProviderOptions(
   modelConfig: LLMModelConfig,
   reasoningEffort?: ReasoningEffort,
 ): Record<string, unknown> | undefined {
-  if (!reasoningEffort) return undefined;
+  if (modelConfig.provider !== 'openai-compatible') return undefined;
 
-  const supportsOpenAIReasoning =
-    modelConfig.provider === 'openai-compatible';
+  const openaiOptions: Record<string, unknown> = {};
+  if (reasoningEffort) {
+    openaiOptions.reasoningEffort = reasoningEffort;
+  }
+  if (modelConfig.useResponsesApi === true) {
+    // Prevent SDK-side item_reference replay during tool-follow-up turns.
+    openaiOptions.store = false;
+  }
 
-  if (!supportsOpenAIReasoning) return undefined;
-
-  return {
-    openai: {
-      reasoningEffort,
-    },
-  };
+  return Object.keys(openaiOptions).length > 0
+    ? { openai: openaiOptions }
+    : undefined;
 }
 
 function buildMastraMemoryOptions(
@@ -180,6 +238,52 @@ function buildMastraMemoryOptions(
       resource: getResourceId(),
     },
   };
+}
+
+type RawStreamChunk = {
+  type?: string;
+  payload?: Record<string, unknown>;
+} & Record<string, unknown>;
+
+function extractStreamText(payload?: Record<string, unknown>): string {
+  if (!payload) return '';
+  if (typeof payload.text === 'string') return payload.text;
+  if (typeof payload.textDelta === 'string') return payload.textDelta;
+  if (typeof payload.delta === 'string') return payload.delta;
+  return '';
+}
+
+function extractStreamFinishReason(payload?: Record<string, unknown>): string | undefined {
+  const stepResult = payload?.stepResult as { reason?: string } | undefined;
+  if (typeof stepResult?.reason === 'string') return stepResult.reason;
+  if (typeof payload?.finishReason === 'string') return payload.finishReason;
+  return undefined;
+}
+
+function isExpectedMastraStructuralEvent(type: string): boolean {
+  return type === 'start'
+    || type === 'abort'
+    || type === 'text-start'
+    || type === 'text-end'
+    || type === 'step-start'
+    || type === 'stream-start'
+    || type === 'response-metadata'
+    || type === 'reasoning'
+    || type === 'reasoning-start'
+    || type === 'reasoning-delta'
+    || type === 'reasoning-end'
+    || type === 'reasoning-signature'
+    || type === 'redacted-reasoning'
+    || type === 'source'
+    || type === 'file'
+    || type === 'tool-call-streaming-start'
+    || type === 'tool-call-input-streaming-start'
+    || type === 'tool-call-input-streaming-end'
+    || type === 'tool-call-delta'
+    || type === 'tool-input-start'
+    || type === 'tool-input-delta'
+    || type === 'tool-input-end'
+    || type === 'raw';
 }
 
 export async function* streamAgentResponse(
@@ -202,7 +306,6 @@ export async function* streamAgentResponse(
   console.info(`[Agent:upstream] conv=${conversationId} model=${modelConfig.modelName} provider=${modelConfig.provider} endpoint=${modelConfig.endpoint ?? 'default'}`);
   console.info(`[Agent:upstream] messageCount=${msgArray.length} roles=[${msgArray.map((m) => m.role ?? '?').join(',')}]`);
 
-  const model = await createLanguageModelFromConfig(modelConfig);
   const memory = getSharedMemory(config, dbPath);
   const mastraTools = toMastraTools(conversationId, tools, {
     emitEvent: options?.emitEvent,
@@ -211,14 +314,17 @@ export async function* streamAgentResponse(
     augmentToolResult: options?.augmentToolResult,
   });
 
-  const agent = new Agent({
-    id: `legion-${conversationId}`,
-    name: 'legion',
-    instructions: buildAgentInstructions(config.systemPrompt),
-    model: model as any,
-    tools: mastraTools,
-    ...(memory ? { memory } : {}),
-  });
+  const buildAgent = async (activeModelConfig: LLMModelConfig): Promise<Agent> => {
+    const model = await createLanguageModelFromConfig(activeModelConfig);
+    return new Agent({
+      id: `legion-${conversationId}`,
+      name: 'legion',
+      instructions: buildAgentInstructions(config.systemPrompt),
+      model: model as any,
+      tools: mastraTools,
+      ...(memory ? { memory } : {}),
+    });
+  };
 
   const modelSettings: Record<string, unknown> = {};
   if (typeof config.advanced.temperature === 'number') {
@@ -229,9 +335,9 @@ export async function* streamAgentResponse(
   const useGenerate = isReasoningGatewayModel(modelConfig);
 
   if (useGenerate) {
-    yield* generateWithSyntheticEvents(agent, conversationId, messages, config, memory, modelSettings, providerOptions, options);
+    yield* generateWithSyntheticEvents(buildAgent, conversationId, messages, modelConfig, config, memory, modelSettings, providerOptions, options);
   } else {
-    yield* streamWithRealEvents(agent, conversationId, messages, modelConfig, config, memory, modelSettings, providerOptions, options);
+    yield* streamWithRealEvents(buildAgent, conversationId, messages, modelConfig, config, memory, modelSettings, providerOptions, options);
   }
 }
 
@@ -240,9 +346,10 @@ export async function* streamAgentResponse(
  * Uses agent.generate() with onStepFinish to synthesize streaming events.
  */
 async function* generateWithSyntheticEvents(
-  agent: Agent,
+  buildAgent: (modelConfig: LLMModelConfig) => Promise<Agent>,
   conversationId: string,
   messages: unknown[],
+  modelConfig: LLMModelConfig,
   config: LegionConfig,
   memory: ReturnType<typeof getSharedMemory>,
   modelSettings: Record<string, unknown>,
@@ -252,90 +359,105 @@ async function* generateWithSyntheticEvents(
     emitEvent?: (event: StreamEvent) => void;
   },
 ): AsyncGenerator<StreamEvent> {
-  // Events are queued from the onStepFinish callback and drained after generate completes
-  const eventQueue: StreamEvent[] = [];
   let terminalFinishReason: string | undefined;
+  let activeModelSettings = { ...modelSettings };
+  let activeModelConfig = { ...modelConfig };
+  let compatibilityRetried = false;
 
-  try {
-    const msgArr = messages as Array<{ role?: string }>;
-    console.info(`[Agent:generate] conv=${conversationId} messageCount=${msgArr.length} roles=[${msgArr.map((m) => m.role ?? '?').join(',')}] maxSteps=${config.advanced.maxSteps} temp=${config.advanced.temperature}`);
-    const memoryOptions = buildMastraMemoryOptions(conversationId, memory);
+  while (true) {
+    const eventQueue: StreamEvent[] = [];
 
-    const result = await agent.generate(messages as Parameters<typeof agent.generate>[0], {
-      maxSteps: config.advanced.maxSteps,
-      abortSignal: options?.abortSignal,
-      ...(Object.keys(modelSettings).length > 0 ? { modelSettings } : {}),
-      ...(providerOptions ? { providerOptions } : {}),
-      ...(memoryOptions ?? {}),
-      onStepFinish: (step: unknown) => {
-        const s = step as {
-          text?: string;
-          toolCalls?: Array<{ toolCallId: string; toolName: string; args: unknown }>;
-          toolResults?: Array<{ toolCallId: string; toolName: string; result: unknown }>;
+    try {
+      const agent = await buildAgent(activeModelConfig);
+      const msgArr = messages as Array<{ role?: string }>;
+      console.info(
+        `[Agent:generate] conv=${conversationId} messageCount=${msgArr.length} roles=[${msgArr.map((m) => m.role ?? '?').join(',')}] maxSteps=${config.advanced.maxSteps} temp=${typeof activeModelSettings.temperature === 'number' ? activeModelSettings.temperature : 'default'}`,
+      );
+      const memoryOptions = buildMastraMemoryOptions(conversationId, memory);
+
+      const result = await agent.generate(messages as Parameters<typeof agent.generate>[0], {
+        maxSteps: config.advanced.maxSteps,
+        abortSignal: options?.abortSignal,
+        ...(Object.keys(activeModelSettings).length > 0 ? { modelSettings: activeModelSettings } : {}),
+        ...(providerOptions ? { providerOptions } : {}),
+        ...(memoryOptions ?? {}),
+        onStepFinish: (step: unknown) => {
+          const s = step as {
+            text?: string;
+            toolCalls?: Array<{ toolCallId: string; toolName: string; args: unknown }>;
+            toolResults?: Array<{ toolCallId: string; toolName: string; result: unknown }>;
+          };
+
+          if (s.toolCalls) {
+            for (const tc of s.toolCalls) {
+              const startedAt = new Date().toISOString();
+              eventQueue.push({
+                conversationId,
+                type: 'tool-call',
+                toolCallId: tc.toolCallId,
+                toolName: tc.toolName,
+                args: tc.args,
+                startedAt,
+              });
+            }
+          }
+          if (s.toolResults) {
+            for (const tr of s.toolResults) {
+              const finishedAt = new Date().toISOString();
+              eventQueue.push({
+                conversationId,
+                type: 'tool-result',
+                toolCallId: tr.toolCallId,
+                toolName: tr.toolName,
+                result: tr.result,
+                finishedAt,
+              });
+            }
+          }
+        },
+      } as any);
+
+      for (const event of eventQueue) {
+        yield event;
+      }
+
+      const fullResult = result as { text?: string; finishReason?: string | { unified?: string } };
+      if (fullResult.text) {
+        yield {
+          conversationId,
+          type: 'text-delta',
+          text: fullResult.text,
         };
+      }
+      terminalFinishReason = typeof fullResult.finishReason === 'string'
+        ? fullResult.finishReason
+        : fullResult.finishReason?.unified;
 
-        // Emit tool call/result events for each step
-        if (s.toolCalls) {
-          for (const tc of s.toolCalls) {
-            const startedAt = new Date().toISOString();
-            eventQueue.push({
-              conversationId,
-              type: 'tool-call',
-              toolCallId: tc.toolCallId,
-              toolName: tc.toolName,
-              args: tc.args,
-              startedAt,
-            });
-          }
-        }
-        if (s.toolResults) {
-          for (const tr of s.toolResults) {
-            const finishedAt = new Date().toISOString();
-            eventQueue.push({
-              conversationId,
-              type: 'tool-result',
-              toolCallId: tr.toolCallId,
-              toolName: tr.toolName,
-              result: tr.result,
-              finishedAt,
-            });
-          }
-        }
-      },
-    } as any);
+      console.info(`[Agent] Generate completed for ${conversationId}`);
+      break;
+    } catch (error) {
+      const emittedAnyOutput = eventQueue.length > 0;
+      if (!compatibilityRetried && shouldRetryWithoutTemperature(error, activeModelSettings, emittedAnyOutput)) {
+        compatibilityRetried = true;
+        activeModelSettings = omitTemperature(activeModelSettings);
+        activeModelConfig = withTemperatureOmissionHeader(activeModelConfig);
+        console.warn(`[Agent] Retrying ${conversationId} without temperature after compatibility error:`, getErrorMessage(error));
+        continue;
+      }
 
-    // Drain queued step events first (tool calls/results from intermediate steps)
-    for (const event of eventQueue) {
-      yield event;
-    }
+      for (const event of eventQueue) {
+        yield event;
+      }
 
-    // Emit the final text as a single text-delta
-    const fullResult = result as { text?: string; finishReason?: string | { unified?: string } };
-    if (fullResult.text) {
-      yield {
-        conversationId,
-        type: 'text-delta',
-        text: fullResult.text,
-      };
-    }
-    terminalFinishReason = typeof fullResult.finishReason === 'string'
-      ? fullResult.finishReason
-      : fullResult.finishReason?.unified;
-
-    console.info(`[Agent] Generate completed for ${conversationId}`);
-  } catch (error) {
-    // Drain any events that were queued before the error
-    for (const event of eventQueue) {
-      yield event;
-    }
-
-    if (!options?.abortSignal?.aborted) {
-      console.error(`[Agent] Generate error for ${conversationId}:`, error);
-      yield {
-        conversationId,
-        type: 'error',
-        error: error instanceof Error ? error.message : String(error),
-      };
+      if (!options?.abortSignal?.aborted) {
+        console.error(`[Agent] Generate error for ${conversationId}:`, error);
+        yield {
+          conversationId,
+          type: 'error',
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+      break;
     }
   }
 
@@ -350,7 +472,7 @@ async function* generateWithSyntheticEvents(
  * Standard streaming path for models that support it.
  */
 async function* streamWithRealEvents(
-  agent: Agent,
+  buildAgent: (modelConfig: LLMModelConfig) => Promise<Agent>,
   conversationId: string,
   messages: unknown[],
   modelConfig: LLMModelConfig,
@@ -366,136 +488,181 @@ async function* streamWithRealEvents(
   let emittedAnyOutput = false;
   let emittedTerminalError = false;
   let terminalFinishReason: string | undefined;
+  let activeModelSettings = { ...modelSettings };
+  let activeModelConfig = { ...modelConfig };
+  let compatibilityRetried = false;
 
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      console.info(`[Agent] Starting stream for ${conversationId}${attempt > 0 ? ` (retry ${attempt})` : ''}`);
-      const memoryOptions = buildMastraMemoryOptions(conversationId, memory);
+  compatibilityLoop:
+  while (true) {
+    let requestCompleted = false;
+    let compatibilityRetryRequested = false;
+    const agent = await buildAgent(activeModelConfig);
 
-      const streamResult = await agent.stream(messages as Parameters<typeof agent.stream>[0], {
-        maxSteps: config.advanced.maxSteps,
-        abortSignal: options?.abortSignal,
-        ...(Object.keys(modelSettings).length > 0 ? { modelSettings } : {}),
-        ...(providerOptions ? { providerOptions } : {}),
-        ...(memoryOptions ?? {}),
-      } as any);
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        console.info(
+          `[Agent] Starting stream for ${conversationId}${attempt > 0 ? ` (retry ${attempt})` : ''}${compatibilityRetried ? ' [temp-omitted]' : ''}`,
+        );
+        const memoryOptions = buildMastraMemoryOptions(conversationId, memory);
 
-      const fullStream = streamResult.fullStream;
-      const iterator =
-        Symbol.asyncIterator in (fullStream as object)
-          ? (fullStream as AsyncIterable<unknown>)
-          : asAsyncIterable(fullStream as ReadableStream<unknown>);
+        const streamResult = await agent.stream(messages as Parameters<typeof agent.stream>[0], {
+          maxSteps: config.advanced.maxSteps,
+          abortSignal: options?.abortSignal,
+          ...(Object.keys(activeModelSettings).length > 0 ? { modelSettings: activeModelSettings } : {}),
+          ...(providerOptions ? { providerOptions } : {}),
+          ...(memoryOptions ?? {}),
+        } as any);
 
-      for await (const chunk of iterator) {
-        const c = chunk as { type?: string; payload?: Record<string, unknown> };
-        const type = c?.type;
-        const payload = (c?.payload ?? c) as Record<string, unknown> | undefined;
+        const fullStream = streamResult.fullStream;
+        const iterator =
+          Symbol.asyncIterator in (fullStream as object)
+            ? (fullStream as AsyncIterable<unknown>)
+            : asAsyncIterable(fullStream as ReadableStream<unknown>);
 
-        if (type === 'text-delta') {
-          emittedAnyOutput = true;
-          yield {
-            conversationId,
-            type: 'text-delta',
-            text: typeof payload?.text === 'string' ? payload.text : '',
-          };
-        } else if (type === 'tool-call') {
-          emittedAnyOutput = true;
-          const toolCallId = (payload?.toolCallId as string) ?? `tc-${Date.now()}`;
-          const toolName = (payload?.toolName as string) ?? 'unknown';
-          const startedAt = new Date().toISOString();
-          toolStartByCallId.set(toolCallId, { startedAt, toolName });
-          yield {
-            conversationId,
-            type: 'tool-call',
-            toolCallId,
-            toolName,
-            args: payload?.args ?? {},
-            startedAt,
-          };
-        } else if (type === 'tool-result') {
-          emittedAnyOutput = true;
-          const toolCallId = (payload?.toolCallId as string) ?? '';
-          const finishedAt = new Date().toISOString();
-          const started = toolStartByCallId.get(toolCallId);
-          toolStartByCallId.delete(toolCallId);
-          yield {
-            conversationId,
-            type: 'tool-result',
-            toolCallId,
-            toolName: (payload?.toolName as string) ?? started?.toolName ?? '',
-            result: payload?.result,
-            startedAt: started?.startedAt ?? finishedAt,
-            finishedAt,
-          };
-        } else if (type === 'tool-error') {
-          emittedAnyOutput = true;
-          const toolCallId = (payload?.toolCallId as string) ?? '';
-          const finishedAt = new Date().toISOString();
-          const started = toolStartByCallId.get(toolCallId);
-          toolStartByCallId.delete(toolCallId);
-          yield {
-            conversationId,
-            type: 'tool-result',
-            toolCallId,
-            toolName: (payload?.toolName as string) ?? started?.toolName ?? '',
-            result: { isError: true, error: payload?.error },
-            startedAt: started?.startedAt ?? finishedAt,
-            finishedAt,
-          };
-        } else if (type === 'error') {
-          emittedTerminalError = true;
-          yield {
-            conversationId,
-            type: 'error',
-            error: String(payload?.error ?? 'Unknown stream error'),
-          };
-        } else if (type === 'finish') {
-          const stepResult = payload?.stepResult as { reason?: string } | undefined;
-          if (stepResult?.reason) {
-            terminalFinishReason = stepResult.reason;
-          }
-          if (stepResult?.reason === 'error' && !emittedTerminalError && !options?.abortSignal?.aborted) {
+        for await (const chunk of iterator) {
+          const c = chunk as RawStreamChunk;
+          const type = c?.type;
+          const payload = (c?.payload ?? c) as Record<string, unknown> | undefined;
+
+          if (type === 'text-delta') {
+            const text = extractStreamText(payload);
+            if (!text) continue;
+            emittedAnyOutput = true;
+            yield {
+              conversationId,
+              type: 'text-delta',
+              text,
+            };
+          } else if (type === 'tool-call') {
+            emittedAnyOutput = true;
+            const toolCallId = (payload?.toolCallId as string) ?? `tc-${Date.now()}`;
+            const toolName = (payload?.toolName as string) ?? 'unknown';
+            const startedAt = new Date().toISOString();
+            toolStartByCallId.set(toolCallId, { startedAt, toolName });
+            yield {
+              conversationId,
+              type: 'tool-call',
+              toolCallId,
+              toolName,
+              args: payload?.args ?? {},
+              startedAt,
+            };
+          } else if (type === 'tool-result') {
+            emittedAnyOutput = true;
+            const toolCallId = (payload?.toolCallId as string) ?? '';
+            const finishedAt = new Date().toISOString();
+            const started = toolStartByCallId.get(toolCallId);
+            toolStartByCallId.delete(toolCallId);
+            yield {
+              conversationId,
+              type: 'tool-result',
+              toolCallId,
+              toolName: (payload?.toolName as string) ?? started?.toolName ?? '',
+              result: payload?.result,
+              startedAt: started?.startedAt ?? finishedAt,
+              finishedAt,
+            };
+          } else if (type === 'tool-error') {
+            emittedAnyOutput = true;
+            const toolCallId = (payload?.toolCallId as string) ?? '';
+            const finishedAt = new Date().toISOString();
+            const started = toolStartByCallId.get(toolCallId);
+            toolStartByCallId.delete(toolCallId);
+            yield {
+              conversationId,
+              type: 'tool-result',
+              toolCallId,
+              toolName: (payload?.toolName as string) ?? started?.toolName ?? '',
+              result: { isError: true, error: payload?.error },
+              startedAt: started?.startedAt ?? finishedAt,
+              finishedAt,
+            };
+          } else if (type === 'error') {
+            const rawError = payload?.error ?? payload ?? 'Unknown stream error';
+            const errorMessage = getErrorMessage(rawError);
+            if (!compatibilityRetried && shouldRetryWithoutTemperature(rawError, activeModelSettings, emittedAnyOutput)) {
+              compatibilityRetried = true;
+              activeModelSettings = omitTemperature(activeModelSettings);
+              activeModelConfig = withTemperatureOmissionHeader(activeModelConfig);
+              compatibilityRetryRequested = true;
+              console.warn(`[Agent] Retrying ${conversationId} without temperature after compatibility stream error:`, errorMessage);
+              break;
+            }
+
             emittedTerminalError = true;
             yield {
               conversationId,
               type: 'error',
-              error: 'The model ended the stream with an error.',
+              error: errorMessage,
             };
+          } else if (type === 'finish') {
+            const finishReason = extractStreamFinishReason(payload);
+            if (finishReason) {
+              terminalFinishReason = finishReason;
+            }
+            if (finishReason === 'error' && !emittedTerminalError && !options?.abortSignal?.aborted) {
+              emittedTerminalError = true;
+              yield {
+                conversationId,
+                type: 'error',
+                error: 'The model ended the stream with an error.',
+              };
+            }
+          } else if (type === 'step-finish') {
+            const finishReason = extractStreamFinishReason(payload);
+            if (finishReason === 'content-filter') {
+              terminalFinishReason = finishReason;
+              console.info(`[Agent] Ending stream early for ${conversationId} after content-filter step finish`);
+              break;
+            }
+          } else if (type && isExpectedMastraStructuralEvent(type)) {
+            continue;
+          } else if (type) {
+            console.info(`[Agent] Unknown stream event type: ${type}`, payload);
           }
-        } else if (type === 'step-finish') {
-          const stepResult = payload?.stepResult as { reason?: string } | undefined;
-          if (stepResult?.reason === 'content-filter') {
-            terminalFinishReason = stepResult.reason;
-            // Filtered completions already produced their refusal text; continuing only burns more steps.
-            console.info(`[Agent] Ending stream early for ${conversationId} after content-filter step finish`);
-            break;
-          }
-        } else if (type) {
-          console.info(`[Agent] Unknown stream event type: ${type}`, payload);
         }
+
+        if (compatibilityRetryRequested) {
+          continue compatibilityLoop;
+        }
+
+        console.info(`[Agent] Stream completed for ${conversationId}`);
+        requestCompleted = true;
+        break;
+      } catch (error) {
+        if (options?.abortSignal?.aborted) break compatibilityLoop;
+
+        const shouldRetry = attempt === 0 && !emittedAnyOutput && isRetryableBedrock503(error, modelConfig);
+        if (shouldRetry) {
+          console.warn(`[Agent] Retrying transient Bedrock stream failure for ${conversationId}:`, error);
+          await sleep(700);
+          continue;
+        }
+
+        if (!compatibilityRetried && shouldRetryWithoutTemperature(error, activeModelSettings, emittedAnyOutput)) {
+          compatibilityRetried = true;
+          activeModelSettings = omitTemperature(activeModelSettings);
+          activeModelConfig = withTemperatureOmissionHeader(activeModelConfig);
+          console.warn(`[Agent] Retrying ${conversationId} without temperature after compatibility error:`, getErrorMessage(error));
+          continue compatibilityLoop;
+        }
+
+        console.error(`[Agent] Stream error for ${conversationId}:`, error);
+        emittedTerminalError = true;
+        yield {
+          conversationId,
+          type: 'error',
+          error: getErrorMessage(error),
+        };
+        break compatibilityLoop;
       }
+    }
 
-      console.info(`[Agent] Stream completed for ${conversationId}`);
-      break;
-    } catch (error) {
-      if (options?.abortSignal?.aborted) break;
-
-      const shouldRetry = attempt === 0 && !emittedAnyOutput && isRetryableBedrock503(error, modelConfig);
-      if (shouldRetry) {
-        console.warn(`[Agent] Retrying transient Bedrock stream failure for ${conversationId}:`, error);
-        await sleep(700);
-        continue;
-      }
-
-      console.error(`[Agent] Stream error for ${conversationId}:`, error);
-      emittedTerminalError = true;
-      yield {
-        conversationId,
-        type: 'error',
-        error: getErrorMessage(error),
-      };
+    if (requestCompleted || options?.abortSignal?.aborted) {
       break;
     }
+
+    break;
   }
 
   if (options?.abortSignal?.aborted) {
