@@ -231,6 +231,11 @@ const realtimeConfigSchema = z.object({
   }).optional(),
 });
 
+const pluginApprovalSchema = z.object({
+  hash: z.string(),
+  approvedAt: z.string(),
+});
+
 export const legionConfigSchema = z.object({
   models: modelsConfigSchema,
   runtime: runtimeConfigSchema,
@@ -252,6 +257,7 @@ export const legionConfigSchema = z.object({
   }),
   systemPrompt: z.string(),
   plugins: z.record(z.record(z.unknown())).optional(),
+  pluginApprovals: z.record(pluginApprovalSchema),
   ui: z.object({
     theme: z.enum(['light', 'dark', 'system']),
     sidebarWidth: z.number().positive(),

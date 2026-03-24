@@ -105,6 +105,7 @@ function getDefaultConfig() {
     },
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
     plugins: {} as Record<string, Record<string, unknown>>,
+    pluginApprovals: {} as Record<string, { hash: string; approvedAt: string }>,
     ui: {
       theme: 'system' as const,
       sidebarWidth: 280,
@@ -572,6 +573,7 @@ export function desktopConfigPayload(config: LegionConfig): Record<string, unkno
     skills: config.skills,
     systemPrompt: config.systemPrompt,
     plugins: config.plugins,
+    pluginApprovals: config.pluginApprovals,
     ui: config.ui,
     audio: config.audio,
     realtime: config.realtime,

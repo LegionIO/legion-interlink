@@ -1,6 +1,7 @@
-import { BrowserWindow } from 'electron';
+import { createHash } from 'crypto';
+import { BrowserWindow, dialog } from 'electron';
 import { readdirSync, readFileSync, existsSync, statSync } from 'fs';
-import { join } from 'path';
+import { join, relative } from 'path';
 import { pathToFileURL } from 'url';
 import type {
   PluginManifest,
@@ -17,10 +18,21 @@ import type {
   PostReceiveHookArgs,
   PostReceiveHookResult,
   PluginAPI,
+  PluginPermission,
 } from './types.js';
 import { createPluginAPI, cleanupPluginAPI } from './plugin-api.js';
 import type { LegionConfig } from '../config/schema.js';
 import type { ToolDefinition } from '../tools/types.js';
+
+const PLUGIN_PERMISSION_LABELS: Record<PluginPermission, string> = {
+  'config:read': 'Read app configuration',
+  'config:write': 'Write app configuration',
+  'tools:register': 'Register tools the assistant can call',
+  'ui:banner': 'Show banner UI in the app',
+  'ui:modal': 'Show modal UI in the app',
+  'ui:settings': 'Add plugin settings screens',
+  'messages:hook': 'Inspect or modify model messages',
+};
 
 export class PluginManager {
   private plugins: Map<string, PluginInstance> = new Map();
@@ -87,6 +99,101 @@ export class PluginManager {
 
   /* ── Loading ── */
 
+  private collectPluginFiles(rootDir: string, currentDir = rootDir): string[] {
+    const entries = readdirSync(currentDir, { withFileTypes: true })
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const files: string[] = [];
+
+    for (const entry of entries) {
+      const fullPath = join(currentDir, entry.name);
+      if (entry.isDirectory()) {
+        files.push(...this.collectPluginFiles(rootDir, fullPath));
+        continue;
+      }
+      if (entry.isFile()) {
+        files.push(fullPath);
+      }
+    }
+
+    return files;
+  }
+
+  private computePluginFileHash(dir: string): string {
+    const hash = createHash('sha256');
+    const files = this.collectPluginFiles(dir);
+
+    for (const filePath of files) {
+      const relativePath = relative(dir, filePath).replace(/\\/g, '/');
+      hash.update(relativePath);
+      hash.update('\0');
+      hash.update(readFileSync(filePath));
+      hash.update('\0');
+    }
+
+    return hash.digest('hex');
+  }
+
+  private getPluginApprovals(): LegionConfig['pluginApprovals'] {
+    return this.getConfig().pluginApprovals ?? {};
+  }
+
+  private isPluginApproved(pluginName: string, fileHash: string): boolean {
+    return this.getPluginApprovals()[pluginName]?.hash === fileHash;
+  }
+
+  private persistPluginApproval(pluginName: string, fileHash: string): void {
+    this.setConfig('pluginApprovals', {
+      ...this.getPluginApprovals(),
+      [pluginName]: {
+        hash: fileHash,
+        approvedAt: new Date().toISOString(),
+      },
+    });
+  }
+
+  private async ensurePluginApproved(manifest: PluginManifest, fileHash: string): Promise<boolean> {
+    if (this.isPluginApproved(manifest.name, fileHash)) {
+      return true;
+    }
+
+    const declaredPermissions = manifest.permissions.length > 0
+      ? manifest.permissions.map((permission) => `• ${PLUGIN_PERMISSION_LABELS[permission]}`).join('\n')
+      : '• This plugin did not declare any permissions in plugin.json.';
+    const detail = [
+      `Plugin: ${manifest.displayName} (${manifest.name})`,
+      `Version: ${manifest.version}`,
+      '',
+      manifest.description || 'No description provided.',
+      '',
+      'Declared permissions:',
+      declaredPermissions,
+      '',
+      `Approval fingerprint: ${fileHash.slice(0, 16)}`,
+      'This approval is tied to the current plugin files. If the plugin changes, Legion will ask again before loading it.',
+    ].join('\n');
+
+    const messageBoxOptions: Electron.MessageBoxOptions = {
+      type: 'warning',
+      buttons: ['Allow Plugin', 'Not Now'],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true,
+      message: `Allow "${manifest.displayName}" to load?`,
+      detail,
+    };
+    const parentWindow = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+    const result = parentWindow
+      ? await dialog.showMessageBox(parentWindow, messageBoxOptions)
+      : await dialog.showMessageBox(messageBoxOptions);
+
+    if (result.response !== 0) {
+      return false;
+    }
+
+    this.persistPluginApproval(manifest.name, fileHash);
+    return true;
+  }
+
   async loadAll(): Promise<void> {
     const discovered = this.discoverPlugins();
     console.info(`[PluginManager] Discovered ${discovered.length} plugins`);
@@ -100,6 +207,7 @@ export class PluginManager {
     const instance: PluginInstance = {
       manifest,
       dir,
+      fileHash: '',
       state: 'loading',
       module: null,
       registeredTools: [],
@@ -114,6 +222,16 @@ export class PluginManager {
     this.plugins.set(manifest.name, instance);
 
     try {
+      instance.fileHash = this.computePluginFileHash(dir);
+      if (!(await this.ensurePluginApproved(manifest, instance.fileHash))) {
+        instance.state = 'disabled';
+        instance.error = 'Plugin permission approval is required before it can be loaded.';
+        this.broadcastUIState();
+        this.notifyToolsChanged();
+        console.info(`[PluginManager] Plugin "${manifest.name}" is awaiting approval and was not loaded`);
+        return;
+      }
+
       const mainPath = join(dir, manifest.main);
       if (!existsSync(mainPath)) {
         throw new Error(`Plugin entry point not found: ${mainPath}`);
@@ -142,11 +260,14 @@ export class PluginManager {
       }
 
       instance.state = 'active';
+      instance.error = undefined;
+      this.broadcastUIState();
       this.notifyToolsChanged();
       console.info(`[PluginManager] Plugin "${manifest.name}" activated (priority=${manifest.priority}, required=${manifest.required})`);
     } catch (err) {
       instance.state = 'error';
       instance.error = err instanceof Error ? err.message : String(err);
+      this.broadcastUIState();
       this.notifyToolsChanged();
       console.error(`[PluginManager] Failed to load plugin "${manifest.name}":`, err);
     }
@@ -271,7 +392,7 @@ export class PluginManager {
     let requiredPluginsReady = true;
 
     for (const instance of this.plugins.values()) {
-      if (instance.state === 'error' && instance.manifest.required) {
+      if ((instance.state === 'error' || instance.state === 'disabled') && instance.manifest.required) {
         requiredPluginsReady = false;
       }
 
@@ -279,9 +400,9 @@ export class PluginManager {
       modals.push(...instance.uiModals);
       settingsSections.push(...instance.uiSettingsSections);
 
-      // Collect renderer scripts for plugins that have a renderer entry
-      // Include regardless of state so the renderer can load components before activate() completes
-      if (instance.manifest.renderer) {
+      // Collect renderer scripts only for plugins that are allowed to run.
+      // Loading plugins are included so the renderer can register components before activate() completes.
+      if (instance.state !== 'disabled' && instance.state !== 'error' && instance.manifest.renderer) {
         const scriptPath = join(instance.dir, instance.manifest.renderer);
         if (existsSync(scriptPath)) {
           try {

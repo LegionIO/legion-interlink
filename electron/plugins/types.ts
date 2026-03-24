@@ -12,6 +12,11 @@ export type PluginPermission =
   | 'ui:settings'
   | 'messages:hook';
 
+export type PluginApprovalRecord = {
+  hash: string;
+  approvedAt: string;
+};
+
 export type PluginManifest = {
   name: string;
   displayName: string;
@@ -32,6 +37,7 @@ export type PluginState = 'loading' | 'active' | 'error' | 'disabled';
 export type PluginInstance = {
   manifest: PluginManifest;
   dir: string;
+  fileHash: string;
   state: PluginState;
   error?: string;
   module: PluginModule | null;
