@@ -184,6 +184,39 @@ const audioConfigSchema = z.object({
   }),
 });
 
+const realtimeConfigSchema = z.object({
+  enabled: z.boolean(),
+  provider: z.enum(['openai', 'azure', 'custom']),
+  openai: z.object({
+    apiKey: z.string().optional(),
+  }).optional(),
+  azure: z.object({
+    endpoint: z.string().optional(),       // e.g. "https://myresource.openai.azure.com"
+    apiKey: z.string().optional(),
+    deploymentName: z.string().optional(),  // e.g. "gpt-realtime-1.5"
+    apiVersion: z.string().optional(),      // e.g. "2024-10-01-preview"
+  }).optional(),
+  custom: z.object({
+    baseUrl: z.string().optional(),        // WebSocket base URL
+    apiKey: z.string().optional(),
+  }).optional(),
+  model: z.string().optional(),            // default: "gpt-4o-realtime-preview"
+  voice: z.string().optional(),            // default: "alloy"
+  instructions: z.string().optional(),     // system instructions for realtime session
+  turnDetection: z.object({
+    type: z.enum(['server_vad', 'none']).optional(),
+    threshold: z.number().min(0).max(1).optional(),
+    silenceDurationMs: z.number().positive().optional(),
+  }).optional(),
+  inputAudioTranscription: z.boolean().optional(),
+  inputDeviceId: z.string().optional(),
+  outputDeviceId: z.string().optional(),
+  autoEndCall: z.object({
+    enabled: z.boolean().optional(),
+    silenceTimeoutSec: z.number().positive().optional(),
+  }).optional(),
+});
+
 export const legionConfigSchema = z.object({
   models: modelsConfigSchema,
   runtime: runtimeConfigSchema,
@@ -210,6 +243,7 @@ export const legionConfigSchema = z.object({
     sidebarWidth: z.number().positive(),
   }),
   audio: audioConfigSchema,
+  realtime: realtimeConfigSchema,
   advanced: z.object({
     temperature: z.number().min(0).max(2),
     maxSteps: z.number().positive(),

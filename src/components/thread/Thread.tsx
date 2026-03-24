@@ -26,23 +26,26 @@ import {
   MicIcon,
   MicOffIcon,
   ChevronUpIcon,
-  CheckIcon as CheckSmallIcon,
+  PhoneIcon,
 } from 'lucide-react';
 import { legion } from '@/lib/ipc-client';
 import { useAttachments } from '@/providers/AttachmentContext';
 import { useBranchNav } from '@/providers/RuntimeProvider';
 import { useConfig } from '@/providers/ConfigProvider';
+import { useRealtime } from '@/providers/RealtimeProvider';
 import { isDictationSupportedForProvider, createUnifiedDictationAdapter, type DictationAdapterTypes, type AudioProvider } from '@/lib/audio/speech-adapters';
 import { MarkdownText } from './MarkdownText';
 import { ToolCallDisplay } from './ToolGroup';
 import { SubAgentInline } from './SubAgentInline';
 import { ComposerInput } from './ComposerInput';
+import { DeviceRow } from './DeviceRow';
 import { SearchBar } from './SearchBar';
 import { ModelSelector } from './ModelSelector';
 import { ReasoningEffortSelector, type ReasoningEffort } from './ReasoningEffortSelector';
 import { ProfileSelector } from './ProfileSelector';
 import { FallbackToggle } from './FallbackToggle';
 import { FallbackBanner } from './FallbackBanner';
+import { CallOverlay } from './CallOverlay';
 const MATRIX_GLYPHS = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890@#$%^&*+-/~{[|`]}<>01';
 
 export const Thread: FC<{
@@ -57,6 +60,7 @@ export const Thread: FC<{
 }> = ({ selectedModelKey, onSelectModel, reasoningEffort, onChangeReasoningEffort, selectedProfileKey, onSelectProfile, fallbackEnabled, onToggleFallback }) => {
   const [searchOpen, setSearchOpen] = useState(false);
   const viewportRef = useRef<HTMLDivElement>(null);
+  const { callState } = useRealtime();
 
   // Listen for Cmd+F
   useEffect(() => {
@@ -85,16 +89,20 @@ export const Thread: FC<{
           <div className="min-h-8" />
         </div>
       </ThreadPrimitive.Viewport>
-      <Composer
-        selectedModelKey={selectedModelKey}
-        onSelectModel={onSelectModel}
-        reasoningEffort={reasoningEffort}
-        onChangeReasoningEffort={onChangeReasoningEffort}
-        selectedProfileKey={selectedProfileKey}
-        onSelectProfile={onSelectProfile}
-        fallbackEnabled={fallbackEnabled}
-        onToggleFallback={onToggleFallback}
-      />
+      {callState.isInCall ? (
+        <CallOverlay />
+      ) : (
+        <Composer
+          selectedModelKey={selectedModelKey}
+          onSelectModel={onSelectModel}
+          reasoningEffort={reasoningEffort}
+          onChangeReasoningEffort={onChangeReasoningEffort}
+          selectedProfileKey={selectedProfileKey}
+          onSelectProfile={onSelectProfile}
+          fallbackEnabled={fallbackEnabled}
+          onToggleFallback={onToggleFallback}
+        />
+      )}
     </ThreadPrimitive.Root>
   );
 };
@@ -927,33 +935,28 @@ const DictationButton: FC = () => {
   );
 };
 
-/** Individual device row with inline level meter */
-const DeviceRow: FC<{
-  label: string;
-  selected: boolean;
-  level: number;
-  onClick: () => void;
-}> = ({ label, selected, level, onClick }) => {
-  const pct = Math.min(100, Math.round(level * 500));
-  const barColor = pct > 60 ? '#22c55e' : pct > 20 ? '#eab308' : '#6b7280';
+const CallButton: FC = () => {
+  const { startCall } = useRealtime();
+
+  const handleClick = useCallback(async () => {
+    try {
+      const id = await legion.conversations.getActiveId() as string | null;
+      if (id) {
+        await startCall(id);
+      }
+    } catch (err) {
+      console.error('[CallButton] Failed to start call:', err);
+    }
+  }, [startCall]);
 
   return (
     <button
       type="button"
-      className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs transition-colors ${
-        selected ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-muted/60 text-foreground'
-      }`}
-      onClick={onClick}
+      onClick={handleClick}
+      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-border/70 bg-card/70 transition-colors hover:bg-muted/50"
+      title="Start voice call"
     >
-      {selected && <CheckSmallIcon className="h-3 w-3 shrink-0" />}
-      <span className="flex-1 min-w-0 truncate text-left">{label}</span>
-      {/* Inline level bar */}
-      <div className="w-16 h-1.5 rounded-full bg-muted/50 overflow-hidden shrink-0">
-        <div
-          className="h-full rounded-full transition-all duration-75"
-          style={{ width: `${pct}%`, backgroundColor: barColor }}
-        />
-      </div>
+      <PhoneIcon className="h-3.5 w-3.5 text-muted-foreground" />
     </button>
   );
 };
@@ -1021,6 +1024,7 @@ const Composer: FC<{
               <PaperclipIcon className="h-4 w-4 text-muted-foreground" />
             </button>
             {dictationEnabled && <DictationButton />}
+            <CallButton />
             <ProfileSelector
               selectedProfileKey={selectedProfileKey}
               onSelectProfile={onSelectProfile}

@@ -74,6 +74,13 @@ type LegionAPI = {
     onModalCallback: (callback: (data: unknown) => void) => () => void;
   };
   modelCatalog: () => Promise<unknown>;
+  realtime: {
+    startSession: (conversationId: string) => Promise<{ ok?: boolean; error?: string }>;
+    endSession: () => Promise<{ ok?: boolean }>;
+    sendAudio: (pcmBase64: string) => void;
+    getStatus: () => Promise<{ status: string }>;
+    onEvent: (callback: (event: unknown) => void) => () => void;
+  };
   profileCatalog: () => Promise<{
     profiles: Array<{ key: string; name: string; primaryModelKey: string; fallbackModelKeys: string[] }>;
     defaultKey: string | null;

@@ -278,3 +278,51 @@ export function createAudioSettingsTool(legionHome: string): ToolDefinition {
     },
   };
 }
+
+/* ── Realtime Audio Settings ── */
+
+export function createRealtimeSettingsTool(legionHome: string): ToolDefinition {
+  return {
+    name: 'realtime_settings',
+    description: [
+      'View or update realtime audio call settings. Controls provider (openai/azure/custom), API keys, model, voice, turn detection, and auto-end call configuration.',
+      'Use "get" to see current values, "set" to change one.',
+    ].join(' '),
+    inputSchema: z.object({
+      action: z.enum(['get', 'set']).describe('Read or write realtime settings'),
+      field: z.enum([
+        'enabled',
+        'provider',
+        'model',
+        'voice',
+        'instructions',
+        'openai.apiKey',
+        'azure.endpoint',
+        'azure.apiKey',
+        'azure.deploymentName',
+        'azure.apiVersion',
+        'custom.baseUrl',
+        'custom.apiKey',
+        'turnDetection.type',
+        'turnDetection.threshold',
+        'turnDetection.silenceDurationMs',
+        'inputAudioTranscription',
+        'inputDeviceId',
+        'outputDeviceId',
+        'autoEndCall.enabled',
+        'autoEndCall.silenceTimeoutSec',
+      ]).optional().describe('Field to set (required for "set")'),
+      value: z.any().optional().describe('New value (required for "set")'),
+    }),
+    execute: async (input) => {
+      const { action, field, value } = input as { action: string; field?: string; value?: unknown };
+      const config = readConfig(legionHome);
+      if (action === 'get') return { realtime: config.realtime };
+      if (!field || value === undefined) return { error: 'Field and value required for "set".' };
+      const previous = getNested(config.realtime as unknown as Record<string, unknown>, field);
+      setNested(config.realtime as unknown as Record<string, unknown>, field, value);
+      writeDesktopConfig(legionHome, config);
+      return settingChanged(field, previous, value);
+    },
+  };
+}

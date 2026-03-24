@@ -121,6 +121,15 @@ function getDefaultConfig() {
       tts: { enabled: true, rate: 1 },
       dictation: { enabled: true, language: 'en-US', continuous: true },
     },
+    realtime: {
+      enabled: true,
+      provider: 'azure' as const,
+      model: 'gpt-4o-realtime-preview',
+      voice: 'alloy',
+      turnDetection: { type: 'server_vad' as const, threshold: 0.5, silenceDurationMs: 500 },
+      inputAudioTranscription: true,
+      autoEndCall: { enabled: true, silenceTimeoutSec: 60 },
+    },
     advanced: {
       temperature: 0.4,
       maxSteps: 10,
@@ -557,6 +566,7 @@ export function desktopConfigPayload(config: LegionConfig): Record<string, unkno
     plugins: config.plugins,
     ui: config.ui,
     audio: config.audio,
+    realtime: config.realtime,
     advanced: config.advanced,
     titleGeneration: config.titleGeneration,
     profiles: config.profiles,

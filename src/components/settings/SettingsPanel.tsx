@@ -12,12 +12,13 @@ import { AdvancedSettings } from './AdvancedSettings';
 import { McpSettings } from './McpSettings';
 import { SkillSettings } from './SkillSettings';
 import { AudioSettings } from './AudioSettings';
+import { RealtimeSettings } from './RealtimeSettings';
 import type { SettingsProps } from './shared';
 import { usePluginSettingsSections } from '@/components/plugins/PluginSettingsSections';
 import { getPluginComponent } from '@/components/plugins/PluginComponentRegistry';
 import { usePlugins } from '@/providers/PluginProvider';
 
-type SettingsSection = 'models' | 'profiles' | 'memory' | 'compaction' | 'tools' | 'skills' | 'sub-agents' | 'system-prompt' | 'audio' | 'advanced' | 'mcp';
+type SettingsSection = 'models' | 'profiles' | 'memory' | 'compaction' | 'tools' | 'skills' | 'sub-agents' | 'system-prompt' | 'audio' | 'realtime' | 'advanced' | 'mcp';
 
 const sections: Array<{ key: SettingsSection; label: string }> = [
   { key: 'models', label: 'Models' },
@@ -30,6 +31,7 @@ const sections: Array<{ key: SettingsSection; label: string }> = [
   { key: 'system-prompt', label: 'System Prompt' },
   { key: 'mcp', label: 'MCP Servers' },
   { key: 'audio', label: 'Audio' },
+  { key: 'realtime', label: 'Realtime Audio' },
   { key: 'advanced', label: 'Advanced' },
 ];
 
@@ -115,6 +117,7 @@ export const SettingsPanel: FC<{ onClose: () => void }> = ({ onClose }) => {
         {activeSection === 'system-prompt' && <SystemPromptSettings config={config} updateConfig={updateConfig} />}
         {activeSection === 'mcp' && <McpSettings config={config} updateConfig={updateConfig} />}
         {activeSection === 'audio' && <AudioSettings config={config} updateConfig={updateConfig} />}
+        {activeSection === 'realtime' && <RealtimeSettings config={config} updateConfig={updateConfig} />}
         {activeSection === 'advanced' && <AdvancedSettings config={config} updateConfig={updateConfig} />}
         {/* Plugin settings sections */}
         {pluginSections.map((ps) => {

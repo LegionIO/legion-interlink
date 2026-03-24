@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, type FC } from 'react';
 import { ConfigProvider, useConfig } from '@/providers/ConfigProvider';
 import { AttachmentProvider } from '@/providers/AttachmentContext';
 import { RuntimeProvider, useSubAgents } from '@/providers/RuntimeProvider';
+import { RealtimeProvider } from '@/providers/RealtimeProvider';
 import { Thread } from '@/components/thread/Thread';
 import { SubAgentThread } from '@/components/thread/SubAgentThread';
 import { DropZone } from '@/components/thread/DropZone';
@@ -296,6 +297,7 @@ function AppShell() {
         onModelFallback={setSelectedModelKey}
         onConversationSettingsLoaded={handleConversationSettingsLoaded}
       >
+      <RealtimeProvider>
         <PluginModalHost />
         <div className="flex h-full bg-transparent text-foreground">
           {/* Sidebar */}
@@ -383,6 +385,7 @@ function AppShell() {
             </div>
           </main>
         </div>
+      </RealtimeProvider>
       </RuntimeProvider>
     </DropZone>
     </AttachmentProvider>

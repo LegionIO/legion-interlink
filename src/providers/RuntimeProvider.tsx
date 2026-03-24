@@ -906,6 +906,34 @@ export function RuntimeProvider({
 
       if (e.type === 'text-delta') {
         applyTextDelta(acc, e.text ?? '');
+      } else if (e.type === 'realtime-user-transcript') {
+        // Realtime audio: create/update a user message for spoken text
+        const itemId = (e as { itemId?: string }).itemId ?? msgId();
+        const isFinal = (e as { isFinal?: boolean }).isFinal ?? true;
+        const text = e.text ?? '';
+        const existingIdx = acc.messages.findIndex((m) => m.id === `rt-user-${itemId}`);
+        if (existingIdx >= 0) {
+          // Update existing partial user message
+          acc.messages[existingIdx] = {
+            ...acc.messages[existingIdx],
+            content: [{ type: 'text', text }],
+          };
+        } else if (text.trim()) {
+          // Create new user message for this spoken utterance
+          const userMsg: StoredMessage = {
+            id: `rt-user-${itemId}`,
+            parentId: acc.headId,
+            role: 'user',
+            content: [{ type: 'text', text }],
+            createdAt: new Date(),
+          };
+          acc.messages.push(userMsg);
+          acc.headId = userMsg.id;
+        }
+      } else if (e.type === 'realtime-status') {
+        // Realtime status changes — no accumulator action needed
+        // (RealtimeProvider handles status display)
+        return;
       } else if (e.type === 'observer-message') {
         applyObserverMessage(acc, e.text ?? '');
       } else if (e.type === 'tool-call') {

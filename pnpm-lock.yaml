@@ -140,6 +140,9 @@ importers:
       tiktoken:
         specifier: ^1.0.22
         version: 1.0.22
+      ws:
+        specifier: ^8.19.0
+        version: 8.19.0
       xml-formatter:
         specifier: ^3.7.0
         version: 3.7.0
@@ -162,6 +165,9 @@ importers:
       '@types/react-dom':
         specifier: ^19.0.0
         version: 19.2.3(@types/react@19.2.14)
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
       '@typescript-eslint/eslint-plugin':
         specifier: ^8.30.0
         version: 8.53.0(@typescript-eslint/parser@8.53.0(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3))(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3)

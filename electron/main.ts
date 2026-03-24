@@ -15,6 +15,7 @@ import { PluginManager } from './plugins/plugin-manager.js';
 import { registerPluginHandlers } from './ipc/plugins.js';
 import { registerMicRecorderHandlers, cleanupMicRecorder } from './audio/mic-recorder.js';
 import { registerLiveSttHandlers } from './audio/live-stt.js';
+import { registerRealtimeHandlers } from './ipc/realtime.js';
 import type { LegionConfig } from './config/schema.js';
 
 const LEGION_HOME = join(homedir(), '.legionio');
@@ -452,8 +453,12 @@ app.whenReady().then(() => {
   // Initialize tools asynchronously
   buildToolRegistry(getConfig, LEGION_HOME).then((tools) => {
     const pluginTools = pluginManager.getAllPluginTools();
-    registerTools([...tools, ...pluginTools]);
+    const allTools = [...tools, ...pluginTools];
+    registerTools(allTools);
     console.info(`[Legion] ${tools.length} tools + ${pluginTools.length} plugin tools registered`);
+
+    // Register realtime handlers (needs tool registry)
+    registerRealtimeHandlers(ipcMain, getConfig, () => allTools);
   }).catch((err) => {
     console.error('[Legion] Failed to build tool registry:', err);
   });

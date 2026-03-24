@@ -129,6 +129,23 @@ const legionAPI = {
   // Model catalog
   modelCatalog: () => ipcRenderer.invoke('agent:model-catalog'),
 
+  // Realtime audio sessions
+  realtime: {
+    startSession: (conversationId: string) =>
+      ipcRenderer.invoke('realtime:start-session', conversationId) as Promise<{ ok?: boolean; error?: string }>,
+    endSession: () =>
+      ipcRenderer.invoke('realtime:end-session') as Promise<{ ok?: boolean }>,
+    sendAudio: (pcmBase64: string) =>
+      ipcRenderer.send('realtime:send-audio', pcmBase64),
+    getStatus: () =>
+      ipcRenderer.invoke('realtime:get-status') as Promise<{ status: string }>,
+    onEvent: (callback: (event: unknown) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: unknown) => callback(data);
+      ipcRenderer.on('realtime:event', handler);
+      return () => ipcRenderer.removeListener('realtime:event', handler);
+    },
+  },
+
   // Profile catalog
   profileCatalog: () => ipcRenderer.invoke('agent:profiles'),
 
