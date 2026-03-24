@@ -261,10 +261,10 @@ export class RealtimeSession {
       if (customCfg.apiKey) {
         headers['Authorization'] = `Bearer ${customCfg.apiKey}`;
       }
-      return {
-        url: `${wsUrl}${separator}model=${encodeURIComponent(model)}`,
-        headers,
-      };
+      const url = `${wsUrl}${separator}model=${encodeURIComponent(model)}`;
+      console.info(`[RealtimeSession] Custom WebSocket URL: ${url}`);
+      console.info(`[RealtimeSession] Custom headers: ${JSON.stringify(Object.keys(headers))}`);
+      return { url, headers };
     }
 
     throw new Error(`Unknown realtime provider: ${provider}`);
@@ -317,6 +317,7 @@ export class RealtimeSession {
       },
     };
 
+    console.info('[RealtimeSession] Sending session.update:', JSON.stringify(sessionConfig, null, 2));
     this.ws.send(JSON.stringify(sessionConfig));
   }
 
@@ -353,16 +354,23 @@ export class RealtimeSession {
       /* ── Input (user) events ── */
 
       case 'input_audio_buffer.speech_started':
+        console.info('[RealtimeSession] VAD: speech started');
         this.broadcastRealtimeEvent({ type: 'input-speech', speaking: true });
         break;
 
       case 'input_audio_buffer.speech_stopped':
+        console.info('[RealtimeSession] VAD: speech stopped');
         this.broadcastRealtimeEvent({ type: 'input-speech', speaking: false });
+        break;
+
+      case 'input_audio_buffer.committed':
+        console.info('[RealtimeSession] Input audio buffer committed:', JSON.stringify(event).slice(0, 300));
         break;
 
       case 'conversation.item.input_audio_transcription.completed': {
         const itemId = event.item_id as string;
         const transcript = event.transcript as string;
+        console.info(`[RealtimeSession] User transcription completed: itemId=${itemId} transcript="${transcript}"`);
         if (transcript) {
           this.userTranscriptBuffers.set(itemId, transcript);
           this.broadcastRealtimeEvent({
@@ -495,7 +503,8 @@ export class RealtimeSession {
       }
 
       default:
-        // Unhandled event type — ignore silently
+        // Log unhandled events so we can spot transcription failures or other issues
+        console.info(`[RealtimeSession] Unhandled event: ${eventType} ${JSON.stringify(event).slice(0, 300)}`);
         break;
     }
   }

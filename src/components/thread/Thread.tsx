@@ -573,51 +573,16 @@ const CopyButton: FC = () => {
 };
 
 const SpeakButton: FC = () => {
-  const [state, setState] = useState<'idle' | 'loading' | 'speaking'>('idle');
+  const message = useMessage();
+  // The assistant-ui runtime tracks speech state on the message:
+  // message.speech is non-null when speaking, null when idle
+  const isSpeaking = (message as { speech?: unknown }).speech != null;
 
-  // When in loading state, listen for audio playback to start
-  // The adapter moves from 'starting' → 'running' when audio plays.
-  // We detect this by monitoring for the 'play' event on any new Audio element.
-  useEffect(() => {
-    if (state !== 'loading') return;
-
-    // Listen for any audio play event (our Azure TTS adapter creates an Audio element)
-    const onPlay = () => setState('speaking');
-    document.addEventListener('play', onPlay, true);
-
-    // Timeout fallback — if no audio plays within 15 seconds, assume it's speaking
-    // (for native TTS which doesn't use Audio elements)
-    const timer = setTimeout(() => {
-      setState((s) => s === 'loading' ? 'speaking' : s);
-    }, 500);
-
-    return () => {
-      document.removeEventListener('play', onPlay, true);
-      clearTimeout(timer);
-    };
-  }, [state]);
-
-  if (state === 'loading') {
+  if (isSpeaking) {
     return (
       <ActionBarPrimitive.StopSpeaking asChild>
         <button
           type="button"
-          onClick={() => setState('idle')}
-          className="flex h-7 w-7 items-center justify-center rounded-xl hover:bg-muted transition-colors"
-          title="Cancel"
-        >
-          <span className="h-3.5 w-3.5 rounded-full border-2 border-primary border-t-transparent animate-spin" />
-        </button>
-      </ActionBarPrimitive.StopSpeaking>
-    );
-  }
-
-  if (state === 'speaking') {
-    return (
-      <ActionBarPrimitive.StopSpeaking asChild>
-        <button
-          type="button"
-          onClick={() => setState('idle')}
           className="flex h-7 w-7 items-center justify-center rounded-xl hover:bg-muted transition-colors"
           title="Stop speaking"
         >
@@ -631,7 +596,6 @@ const SpeakButton: FC = () => {
     <ActionBarPrimitive.Speak asChild>
       <button
         type="button"
-        onClick={() => setState('loading')}
         className="flex h-7 w-7 items-center justify-center rounded-xl hover:bg-muted transition-colors"
         title="Read aloud"
       >
