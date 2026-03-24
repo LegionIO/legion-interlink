@@ -23,8 +23,9 @@ let gridConnections: [(Int, Int)] = [
     (1, 3), (1, 5), (3, 7), (5, 7)
 ]
 
-let litNodes: Set<Int> = [1, 3, 4, 5, 6, 8]
-let litEdges: Set<String> = ["1-3", "1-5", "3-4", "4-5", "3-6", "5-8"]
+// Lit nodes and edges trace an "I" glyph across the 3x3 network.
+let litNodes: Set<Int> = [0, 1, 2, 4, 6, 7, 8]
+let litEdges: Set<String> = ["0-1", "1-2", "1-4", "4-7", "6-7", "7-8"]
 // Keep the tile inset for a standard Dock silhouette, but scale the internal
 // motif up slightly so it doesn't feel undersized inside the tile.
 let iconScale: CGFloat = 1.42
