@@ -234,12 +234,11 @@ export class RealtimeSession {
       if (!azureCfg?.endpoint || !azureCfg?.apiKey) {
         throw new Error('Azure endpoint and API key required for realtime');
       }
-      const host = azureCfg.endpoint.replace(/^https?:\/\//, '').replace(/\/$/, '');
       const deployment = azureCfg.deploymentName || model;
       const apiVersion = azureCfg.apiVersion || '2024-10-01-preview';
-      // Azure Realtime uses query-parameter deployment (matches the documented format):
-      // wss://{host}/openai/realtime?api-version={version}&deployment={deployment}
-      const url = `wss://${host}/openai/realtime?api-version=${apiVersion}&deployment=${encodeURIComponent(deployment)}`;
+      // Derive WebSocket URL from the endpoint, preserving http vs https
+      const wsBase = azureCfg.endpoint.replace(/\/+$/, '').replace(/^http/, 'ws');
+      const url = `${wsBase}/openai/realtime?api-version=${apiVersion}&deployment=${encodeURIComponent(deployment)}`;
       console.info(`[RealtimeSession] Azure config: endpoint="${azureCfg.endpoint}" deploymentName="${azureCfg.deploymentName}" model="${model}" → resolved deployment="${deployment}"`);
       console.info(`[RealtimeSession] Azure WebSocket URL: ${url}`);
       return {
@@ -253,9 +252,16 @@ export class RealtimeSession {
     if (provider === 'custom') {
       const customCfg = this.config.custom;
       if (!customCfg?.baseUrl) throw new Error('Custom base URL required for realtime');
-      const baseUrl = customCfg.baseUrl.replace(/\/$/, '');
-      // Convert http(s) to ws(s) if needed
-      const wsUrl = baseUrl.replace(/^http/, 'ws');
+      const baseUrl = customCfg.baseUrl.replace(/\/+$/, '');
+      // Convert http(s) to ws(s), or leave ws(s) as-is
+      let wsUrl: string;
+      if (/^wss?:\/\//.test(baseUrl)) {
+        wsUrl = baseUrl; // already a WebSocket URL
+      } else if (/^https?:\/\//.test(baseUrl)) {
+        wsUrl = baseUrl.replace(/^http/, 'ws'); // http→ws, https→wss
+      } else {
+        wsUrl = `ws://${baseUrl}`; // no protocol — assume ws://
+      }
       const separator = wsUrl.includes('?') ? '&' : '?';
       const headers: Record<string, string> = {};
       if (customCfg.apiKey) {
