@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, useCallback, type FC } from 'react';
-import { PlusIcon, SearchIcon, Trash2Icon, MessageSquareIcon, LoaderIcon, XIcon, PanelTopOpenIcon, SlidersHorizontalIcon } from 'lucide-react';
+import { PlusIcon, SearchIcon, Trash2Icon, MessageSquareIcon, LoaderIcon, XIcon, PanelTopOpenIcon, SlidersHorizontalIcon, MonitorIcon } from 'lucide-react';
 import { legion } from '@/lib/ipc-client';
 import { EditableInput } from '@/components/EditableInput';
+import { useComputerUse } from '@/providers/ComputerUseProvider';
 import type { ConversationRecord } from '@/providers/RuntimeProvider';
 
 type ConversationSummary = Pick<
@@ -13,7 +14,7 @@ type ConversationSummary = Pick<
 type ConversationListProps = {
   activeConversationId: string | null;
   onSwitchConversation: (id: string) => void;
-  onNewConversation: () => void;
+  onNewConversation: () => Promise<void> | void;
 };
 
 function formatRelativeTime(timestamp: string | null): string {
@@ -35,6 +36,24 @@ const TypingBubble: FC = () => (
     <div className="h-1 w-1 rounded-full bg-primary animate-bounce [animation-delay:0ms]" />
     <div className="h-1 w-1 rounded-full bg-primary animate-bounce [animation-delay:150ms]" />
     <div className="h-1 w-1 rounded-full bg-primary animate-bounce [animation-delay:300ms]" />
+  </div>
+);
+
+/** Pulsing monitor icon — shown when a computer-use session is actively running */
+const ComputerActiveIndicator: FC = () => (
+  <div className="flex items-center gap-1 px-0.5" title="Computer session running">
+    <span className="relative flex h-2 w-2">
+      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-75" />
+      <span className="relative inline-flex h-2 w-2 rounded-full bg-blue-500" />
+    </span>
+    <MonitorIcon className="h-3 w-3 text-blue-500" />
+  </div>
+);
+
+/** Static green dot — shown when a computer-use session has completed */
+const ComputerCompletedIndicator: FC = () => (
+  <div className="flex items-center gap-1 px-0.5" title="Computer session completed">
+    <div className="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]" />
   </div>
 );
 
@@ -99,6 +118,17 @@ export const ConversationList: FC<ConversationListProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [removingIds, setRemovingIds] = useState<Set<string>>(new Set());
+  const { sessionsByConversation } = useComputerUse();
+
+  /** Get the computer-use session status for a conversation */
+  const getComputerStatus = useCallback((conversationId: string): 'running' | 'completed' | null => {
+    const sessions = sessionsByConversation.get(conversationId);
+    if (!sessions?.length) return null;
+    const latest = sessions[0]; // sorted by updatedAt desc
+    if (latest.status === 'running' || latest.status === 'starting' || latest.status === 'awaiting-approval') return 'running';
+    if (latest.status === 'completed') return 'completed';
+    return null;
+  }, [sessionsByConversation]);
 
   const loadConversations = async () => {
     try {
@@ -156,17 +186,33 @@ export const ConversationList: FC<ConversationListProps> = ({
   }, [conversations, searchQuery, isSearchActive]);
 
   const handleDelete = async (id: string) => {
+    const shouldCreateReplacementThread = id === activeConversationId;
     setDeletingId(id);
-    await legion.conversations.delete(id);
-    await loadConversations();
-    setDeletingId(null);
+
+    try {
+      await legion.conversations.delete(id);
+
+      if (shouldCreateReplacementThread) {
+        await onNewConversation();
+      }
+
+      await loadConversations();
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   const handleDeleteBulk = async () => {
     const idsToDelete = filteredConversations.map((c) => c.id);
+
     for (const id of idsToDelete) {
       await legion.conversations.delete(id);
     }
+
+    if (activeConversationId && idsToDelete.includes(activeConversationId)) {
+      await onNewConversation();
+    }
+
     await loadConversations();
   };
 
@@ -183,7 +229,9 @@ export const ConversationList: FC<ConversationListProps> = ({
       <div className="border-b border-sidebar-border/70 px-4 py-3">
         <button
           type="button"
-          onClick={onNewConversation}
+          onClick={() => {
+            void onNewConversation();
+          }}
           className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[15px] font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-accent/80"
         >
           <PlusIcon className="h-4 w-4 text-primary" />
@@ -230,6 +278,7 @@ export const ConversationList: FC<ConversationListProps> = ({
           const isRunning = conv.runStatus === 'running';
           const hasUnread = conv.hasUnread && !isActive;
           const isRemoving = removingIds.has(conv.id);
+          const computerStatus = getComputerStatus(conv.id);
 
           return (
             <div
@@ -263,6 +312,8 @@ export const ConversationList: FC<ConversationListProps> = ({
               <div className="ml-1 flex shrink-0 flex-col items-center gap-1">
                 {hasUnread && <div className="h-2 w-2 rounded-full bg-primary shadow-[0_0_10px_rgba(197,194,245,0.38)]" />}
                 {isRunning && <TypingBubble />}
+                {computerStatus === 'running' && <ComputerActiveIndicator />}
+                {computerStatus === 'completed' && !isActive && <ComputerCompletedIndicator />}
                 <ConversationDeleteButton
                   onDelete={() => handleDelete(conv.id)}
                   isDeleting={deletingId === conv.id}

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell, Menu, nativeTheme, dialog, net, MenuItem, clipboard, session, systemPreferences } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, Menu, nativeTheme, dialog, net, MenuItem, clipboard, systemPreferences } from 'electron';
 import { join } from 'path';
 import { mkdirSync, existsSync, readFileSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
@@ -19,11 +19,18 @@ import { registerMicRecorderHandlers, cleanupMicRecorder } from './audio/mic-rec
 import { registerLiveSttHandlers } from './audio/live-stt.js';
 import { registerRealtimeHandlers, updateActiveRealtimeSessionTools } from './ipc/realtime.js';
 import type { LegionConfig } from './config/schema.js';
+import { registerComputerUseHandlers } from './ipc/computer-use.js';
+import { closeAllOverlayWindows } from './computer-use/overlay-window.js';
 
 const LEGION_HOME = join(homedir(), '.legionio');
 
 // Set app name early so macOS menu bar and dock show "Legion Interlink" instead of "Electron"
 app.setName('Legion Interlink');
+
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+}
 
 // Module-level ref for cleanup in before-quit handler
 let pluginManagerRef: PluginManager | null = null;
@@ -280,205 +287,224 @@ function createWindow(): BrowserWindow {
   return mainWindow;
 }
 
+function focusPrimaryWindow(): void {
+  const win = BrowserWindow.getAllWindows().find((candidate) => !candidate.isDestroyed());
+  if (!win) {
+    if (app.isReady()) createWindow();
+    return;
+  }
+
+  if (win.isMinimized()) win.restore();
+  if (!win.isVisible()) win.show();
+  win.focus();
+}
+
 // Enable speech recognition API (required for webkitSpeechRecognition in Electron)
 app.commandLine.appendSwitch('enable-speech-api');
 app.commandLine.appendSwitch('enable-speech-dispatcher');
 
-app.whenReady().then(() => {
-  ensureLegionHome();
-  applyTheme();
-  buildMenu();
+if (gotSingleInstanceLock) {
+  app.on('second-instance', () => {
+    focusPrimaryWindow();
+  });
 
-  // Request microphone permission on macOS (needed for speech-to-text dictation)
-  if (process.platform === 'darwin') {
-    systemPreferences.askForMediaAccess('microphone').then((granted) => {
-      console.info(`[Legion] Microphone permission: ${granted ? 'granted' : 'denied'}`);
-    }).catch((err) => {
-      console.warn('[Legion] Failed to request microphone permission:', err);
-    });
-  }
+  app.whenReady().then(() => {
+    ensureLegionHome();
+    applyTheme();
+    buildMenu();
 
-  // Set dock icon (macOS) — needed for dev mode since packager config doesn't apply
-  if (process.platform === 'darwin' && app.dock && existsSync(APP_ICON)) {
-    app.dock.setIcon(APP_ICON);
-  }
-
-  // Config reader (used by tools and OAuth)
-  const getConfig = () => readEffectiveConfig(LEGION_HOME);
-
-  // Track last mcpServers fingerprint to detect changes
-  let lastMcpFingerprint = JSON.stringify(getConfig().mcpServers ?? []);
-  let lastSkillsFingerprint = JSON.stringify(getConfig().skills?.enabled ?? []);
-  const syncRealtimeTools = (): void => {
-    updateActiveRealtimeSessionTools(getRegisteredTools());
-  };
-
-  const handleConfigChanged = (config: LegionConfig) => {
-    // MCP hot-reload
-    const newMcpFp = JSON.stringify(config.mcpServers ?? []);
-    if (newMcpFp !== lastMcpFingerprint) {
-      lastMcpFingerprint = newMcpFp;
-      console.info('[Legion] MCP servers changed, rebuilding...');
-      rebuildMcpTools(config.mcpServers ?? []).then((mcpTools) => {
-        updateMcpTools(mcpTools);
-        syncRealtimeTools();
-        console.info(`[Legion] MCP hot-reload complete: ${mcpTools.length} MCP tools`);
+    // Request microphone permission on macOS (needed for speech-to-text dictation)
+    if (process.platform === 'darwin') {
+      systemPreferences.askForMediaAccess('microphone').then((granted) => {
+        console.info(`[Legion] Microphone permission: ${granted ? 'granted' : 'denied'}`);
       }).catch((err) => {
-        console.error('[Legion] MCP hot-reload failed:', err);
+        console.warn('[Legion] Failed to request microphone permission:', err);
       });
     }
 
-    // Skills hot-reload
-    const newSkillsFp = JSON.stringify(config.skills?.enabled ?? []);
-    if (newSkillsFp !== lastSkillsFingerprint) {
-      lastSkillsFingerprint = newSkillsFp;
-      const skillsDir = config.skills?.directory || join(LEGION_HOME, 'skills');
-      const skillTools = loadSkillsAsTools(skillsDir, config.skills?.enabled ?? [], getConfig);
-      updateSkillTools(skillTools);
+    // Set dock icon (macOS) — needed for dev mode since packager config doesn't apply
+    if (process.platform === 'darwin' && app.dock && existsSync(APP_ICON)) {
+      app.dock.setIcon(APP_ICON);
+    }
+
+    // Config reader (used by tools and OAuth)
+    const getConfig = () => readEffectiveConfig(LEGION_HOME);
+
+    // Track last mcpServers fingerprint to detect changes
+    let lastMcpFingerprint = JSON.stringify(getConfig().mcpServers ?? []);
+    let lastSkillsFingerprint = JSON.stringify(getConfig().skills?.enabled ?? []);
+    const syncRealtimeTools = (): void => {
+      updateActiveRealtimeSessionTools(getRegisteredTools());
+    };
+
+    const handleConfigChanged = (config: LegionConfig) => {
+      // MCP hot-reload
+      const newMcpFp = JSON.stringify(config.mcpServers ?? []);
+      if (newMcpFp !== lastMcpFingerprint) {
+        lastMcpFingerprint = newMcpFp;
+        console.info('[Legion] MCP servers changed, rebuilding...');
+        rebuildMcpTools(config.mcpServers ?? []).then((mcpTools) => {
+          updateMcpTools(mcpTools);
+          syncRealtimeTools();
+          console.info(`[Legion] MCP hot-reload complete: ${mcpTools.length} MCP tools`);
+        }).catch((err) => {
+          console.error('[Legion] MCP hot-reload failed:', err);
+        });
+      }
+
+      // Skills hot-reload
+      const newSkillsFp = JSON.stringify(config.skills?.enabled ?? []);
+      if (newSkillsFp !== lastSkillsFingerprint) {
+        lastSkillsFingerprint = newSkillsFp;
+        const skillsDir = config.skills?.directory || join(LEGION_HOME, 'skills');
+        const skillTools = loadSkillsAsTools(skillsDir, config.skills?.enabled ?? [], getConfig);
+        updateSkillTools(skillTools);
+        syncRealtimeTools();
+        console.info(`[Legion] Skills hot-reload complete: ${skillTools.length} skill tools`);
+      }
+
+      // Plugin config change forwarding
+      pluginManager.onConfigChanged(config);
+    };
+
+    // Register IPC handlers
+    const { setConfig } = registerConfigHandlers(ipcMain, LEGION_HOME, handleConfigChanged);
+    registerAgentHandlers(ipcMain, LEGION_HOME);
+    registerConversationHandlers(ipcMain, LEGION_HOME, getConfig);
+    registerMcpHandlers(ipcMain);
+    registerMemoryHandlers(ipcMain, LEGION_HOME, getConfig);
+    registerSkillsHandlers(ipcMain, LEGION_HOME);
+    registerDaemonSettingsHandlers(ipcMain, LEGION_HOME, getConfig);
+    registerDaemonApiHandlers(ipcMain, LEGION_HOME, getConfig, () => BrowserWindow.getAllWindows());
+    registerMicRecorderHandlers(ipcMain);
+    registerLiveSttHandlers(ipcMain);
+    registerComputerUseHandlers(ipcMain, LEGION_HOME, getConfig);
+
+    // Plugin system
+    const pluginManager = new PluginManager(
+      join(LEGION_HOME, 'plugins'),
+      LEGION_HOME,
+      getConfig,
+      setConfig, // Unified setConfig that handles models.* persistence correctly
+    );
+    registerPluginHandlers(ipcMain, pluginManager);
+    pluginManagerRef = pluginManager;
+
+    // Listen for plugin tool changes before plugin activation so early registrations are not missed
+    pluginManager.onToolsChanged((pluginTools) => {
+      updatePluginTools(pluginTools);
       syncRealtimeTools();
-      console.info(`[Legion] Skills hot-reload complete: ${skillTools.length} skill tools`);
-    }
-
-    // Plugin config change forwarding
-    pluginManager.onConfigChanged(config);
-  };
-
-  // Register IPC handlers
-  const { setConfig } = registerConfigHandlers(ipcMain, LEGION_HOME, handleConfigChanged);
-  registerAgentHandlers(ipcMain, LEGION_HOME);
-  registerConversationHandlers(ipcMain, LEGION_HOME);
-  registerMcpHandlers(ipcMain);
-  registerMemoryHandlers(ipcMain, LEGION_HOME, getConfig);
-  registerSkillsHandlers(ipcMain, LEGION_HOME);
-  registerDaemonSettingsHandlers(ipcMain, LEGION_HOME, getConfig);
-  registerDaemonApiHandlers(ipcMain, LEGION_HOME, getConfig, () => BrowserWindow.getAllWindows());
-  registerMicRecorderHandlers(ipcMain);
-  registerLiveSttHandlers(ipcMain);
-
-  // Plugin system
-  const pluginManager = new PluginManager(
-    join(LEGION_HOME, 'plugins'),
-    LEGION_HOME,
-    getConfig,
-    setConfig, // Unified setConfig that handles models.* persistence correctly
-  );
-  registerPluginHandlers(ipcMain, pluginManager);
-  pluginManagerRef = pluginManager;
-
-  // Listen for plugin tool changes before plugin activation so early registrations are not missed
-  pluginManager.onToolsChanged((pluginTools) => {
-    updatePluginTools(pluginTools);
-    syncRealtimeTools();
-  });
-
-  // Load plugins (async — required plugins will show blocking modals when renderer loads)
-  pluginManager.loadAll().then(() => {
-    console.info(`[Legion] ${pluginManager.getPluginCount()} plugins loaded`);
-  }).catch((err) => {
-    console.error('[Legion] Plugin loading failed:', err);
-  });
-
-  // File dialog handler
-  ipcMain.handle('dialog:open-file', async (_event, options?: { filters?: Array<{ name: string; extensions: string[] }> }) => {
-    const win = BrowserWindow.getFocusedWindow();
-    if (!win) return { canceled: true, filePaths: [] };
-    const result = await dialog.showOpenDialog(win, {
-      properties: ['openFile', 'multiSelections'],
-      filters: options?.filters ?? [
-        { name: 'All Files', extensions: ['*'] },
-        { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'] },
-        { name: 'Documents', extensions: ['pdf', 'txt', 'md', 'json', 'csv'] },
-      ],
     });
-    if (result.canceled) return { canceled: true, filePaths: [] };
 
-    // Read files and return as base64 data URLs
-    const files = result.filePaths.map((filePath) => {
-      const data = readFileSync(filePath);
-      const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
-      const mimeTypes: Record<string, string> = {
-        png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
-        webp: 'image/webp', svg: 'image/svg+xml', pdf: 'application/pdf',
-        txt: 'text/plain', md: 'text/markdown', json: 'application/json', csv: 'text/csv',
-      };
-      const mime = mimeTypes[ext] ?? 'application/octet-stream';
-      const isImage = mime.startsWith('image/');
-      return {
-        path: filePath,
-        name: filePath.split('/').pop() ?? filePath,
-        mime,
-        isImage,
-        size: data.length,
-        dataUrl: `data:${mime};base64,${data.toString('base64')}`,
-        // For text files, also include raw text
-        ...(mime.startsWith('text/') || mime === 'application/json'
-          ? { text: data.toString('utf-8') }
-          : {}),
-      };
+    // Load plugins (async — required plugins will show blocking modals when renderer loads)
+    pluginManager.loadAll().then(() => {
+      console.info(`[Legion] ${pluginManager.getPluginCount()} plugins loaded`);
+    }).catch((err) => {
+      console.error('[Legion] Plugin loading failed:', err);
     });
-    return { canceled: false, files };
-  });
 
-  // Fetch image bytes from main process (bypasses CORS)
-  ipcMain.handle('image:fetch', async (_event, url: string) => {
-    try {
-      const resp = await net.fetch(url);
-      if (!resp.ok) return { error: `HTTP ${resp.status}` };
-      const buffer = Buffer.from(await resp.arrayBuffer());
-      const mime = resp.headers.get('content-type') || 'image/png';
-      return { data: buffer.toString('base64'), mime };
-    } catch (err) {
-      return { error: String(err) };
-    }
-  });
+    // File dialog handler
+    ipcMain.handle('dialog:open-file', async (_event, options?: { filters?: Array<{ name: string; extensions: string[] }> }) => {
+      const win = BrowserWindow.getFocusedWindow();
+      if (!win) return { canceled: true, filePaths: [] };
+      const result = await dialog.showOpenDialog(win, {
+        properties: ['openFile', 'multiSelections'],
+        filters: options?.filters ?? [
+          { name: 'All Files', extensions: ['*'] },
+          { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'] },
+          { name: 'Documents', extensions: ['pdf', 'txt', 'md', 'json', 'csv'] },
+        ],
+      });
+      if (result.canceled) return { canceled: true, filePaths: [] };
 
-  // Save image to disk via save dialog
-  ipcMain.handle('image:save', async (_event, url: string, suggestedName?: string) => {
-    const win = BrowserWindow.getFocusedWindow();
-    if (!win) return { canceled: true };
-
-    const ext = (suggestedName?.split('.').pop() ?? 'png').toLowerCase();
-    const result = await dialog.showSaveDialog(win, {
-      defaultPath: suggestedName || 'image.png',
-      filters: [
-        { name: 'Images', extensions: [ext, 'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'] },
-        { name: 'All Files', extensions: ['*'] },
-      ],
+      // Read files and return as base64 data URLs
+      const files = result.filePaths.map((filePath) => {
+        const data = readFileSync(filePath);
+        const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
+        const mimeTypes: Record<string, string> = {
+          png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+          webp: 'image/webp', svg: 'image/svg+xml', pdf: 'application/pdf',
+          txt: 'text/plain', md: 'text/markdown', json: 'application/json', csv: 'text/csv',
+        };
+        const mime = mimeTypes[ext] ?? 'application/octet-stream';
+        const isImage = mime.startsWith('image/');
+        return {
+          path: filePath,
+          name: filePath.split('/').pop() ?? filePath,
+          mime,
+          isImage,
+          size: data.length,
+          dataUrl: `data:${mime};base64,${data.toString('base64')}`,
+          // For text files, also include raw text
+          ...(mime.startsWith('text/') || mime === 'application/json'
+            ? { text: data.toString('utf-8') }
+            : {}),
+        };
+      });
+      return { canceled: false, files };
     });
-    if (result.canceled || !result.filePath) return { canceled: true };
 
-    try {
-      const resp = await net.fetch(url);
-      if (!resp.ok) return { error: `HTTP ${resp.status}` };
-      const buffer = Buffer.from(await resp.arrayBuffer());
-      writeFileSync(result.filePath, buffer);
-      return { canceled: false, filePath: result.filePath };
-    } catch (err) {
-      return { error: String(err) };
-    }
+    // Fetch image bytes from main process (bypasses CORS)
+    ipcMain.handle('image:fetch', async (_event, url: string) => {
+      try {
+        const resp = await net.fetch(url);
+        if (!resp.ok) return { error: `HTTP ${resp.status}` };
+        const buffer = Buffer.from(await resp.arrayBuffer());
+        const mime = resp.headers.get('content-type') || 'image/png';
+        return { data: buffer.toString('base64'), mime };
+      } catch (err) {
+        return { error: String(err) };
+      }
+    });
+
+    // Save image to disk via save dialog
+    ipcMain.handle('image:save', async (_event, url: string, suggestedName?: string) => {
+      const win = BrowserWindow.getFocusedWindow();
+      if (!win) return { canceled: true };
+
+      const ext = (suggestedName?.split('.').pop() ?? 'png').toLowerCase();
+      const result = await dialog.showSaveDialog(win, {
+        defaultPath: suggestedName || 'image.png',
+        filters: [
+          { name: 'Images', extensions: [ext, 'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'] },
+          { name: 'All Files', extensions: ['*'] },
+        ],
+      });
+      if (result.canceled || !result.filePath) return { canceled: true };
+
+      try {
+        const resp = await net.fetch(url);
+        if (!resp.ok) return { error: `HTTP ${resp.status}` };
+        const buffer = Buffer.from(await resp.arrayBuffer());
+        writeFileSync(result.filePath, buffer);
+        return { canceled: false, filePath: result.filePath };
+      } catch (err) {
+        return { error: String(err) };
+      }
+    });
+
+    createWindow();
+
+    // Initialize tools asynchronously
+    buildToolRegistry(getConfig, LEGION_HOME).then((tools) => {
+      const pluginTools = pluginManager.getAllPluginTools();
+      const allTools = [...tools, ...pluginTools];
+      registerTools(allTools);
+      console.info(`[Legion] ${tools.length} tools + ${pluginTools.length} plugin tools registered`);
+
+      // Register realtime handlers (needs tool registry)
+      registerRealtimeHandlers(ipcMain, getConfig, getRegisteredTools, LEGION_HOME);
+    }).catch((err) => {
+      console.error('[Legion] Failed to build tool registry:', err);
+    });
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        createWindow();
+      }
+    });
   });
-
-  createWindow();
-
-  // Initialize tools asynchronously
-  buildToolRegistry(getConfig, LEGION_HOME).then((tools) => {
-    const pluginTools = pluginManager.getAllPluginTools();
-    const allTools = [...tools, ...pluginTools];
-    registerTools(allTools);
-    console.info(`[Legion] ${tools.length} tools + ${pluginTools.length} plugin tools registered`);
-
-    // Register realtime handlers (needs tool registry)
-    registerRealtimeHandlers(ipcMain, getConfig, getRegisteredTools, LEGION_HOME);
-  }).catch((err) => {
-    console.error('[Legion] Failed to build tool registry:', err);
-  });
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
-    }
-  });
-});
+}
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
@@ -492,4 +518,5 @@ app.on('before-quit', () => {
     console.error('[Legion] Plugin cleanup error:', err);
   });
   cleanupMicRecorder();
+  closeAllOverlayWindows();
 });

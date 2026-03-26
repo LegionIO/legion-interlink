@@ -17,6 +17,8 @@ export class RealtimeAudioPlayer {
   /** Sample rate for Realtime API PCM16 audio */
   private static readonly SAMPLE_RATE = 24000;
 
+  private activeSources: Set<AudioBufferSourceNode> = new Set();
+
   async init(outputDeviceId?: string): Promise<void> {
     if (this.audioCtx) {
       await this.audioCtx.close();
@@ -25,6 +27,7 @@ export class RealtimeAudioPlayer {
     this.audioCtx = new AudioContext({ sampleRate: RealtimeAudioPlayer.SAMPLE_RATE });
     this.nextStartTime = 0;
     this.isPlaying = false;
+    this.activeSources.clear();
 
     // Set up analyser for level metering
     this.analyser = this.audioCtx.createAnalyser();
@@ -87,8 +90,10 @@ export class RealtimeAudioPlayer {
     source.start(startTime);
     this.nextStartTime = startTime + audioBuffer.duration;
     this.isPlaying = true;
+    this.activeSources.add(source);
 
     source.onended = () => {
+      this.activeSources.delete(source);
       // Check if this was the last scheduled buffer
       if (ctx.currentTime >= this.nextStartTime - 0.01) {
         this.isPlaying = false;
@@ -97,17 +102,24 @@ export class RealtimeAudioPlayer {
     };
   }
 
-  /** Stop all playback and clear the queue */
+  /** Stop all playback and clear the queue without destroying the AudioContext */
   stop(): void {
-    if (this.audioCtx) {
-      // Close and recreate to cancel all scheduled sources
-      const sinkId = this.sinkId;
-      void this.audioCtx.close().then(() => {
-        void this.init(sinkId || undefined);
-      });
+    // Stop all actively scheduled buffer sources
+    for (const source of this.activeSources) {
+      try {
+        source.stop();
+      } catch {
+        // Already stopped or not started — ignore
+      }
     }
+    this.activeSources.clear();
     this.isPlaying = false;
-    this.nextStartTime = 0;
+    // Reset scheduling time to "now" so next chunks play immediately
+    if (this.audioCtx) {
+      this.nextStartTime = this.audioCtx.currentTime;
+    } else {
+      this.nextStartTime = 0;
+    }
   }
 
   /** Get the current output audio level (0-1) */
@@ -151,6 +163,7 @@ export class RealtimeAudioPlayer {
   }
 
   async destroy(): Promise<void> {
+    this.stop();
     if (this.audioCtx) {
       try {
         await this.audioCtx.close();

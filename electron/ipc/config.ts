@@ -1,10 +1,10 @@
 import type { IpcMain } from 'electron';
-import { BrowserWindow } from 'electron';
 import { readFileSync, writeFileSync, existsSync, watch, mkdirSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import type { LegionConfig } from '../config/schema.js';
 import { detectLegionRuntime } from '../agent/legion-runtime.js';
+import { broadcastToAllWindows } from '../utils/window-send.js';
 
 export type { LegionConfig } from '../config/schema.js';
 
@@ -147,6 +147,68 @@ function getDefaultConfig() {
         workingMemory: { enabled: true },
         semanticRecall: { enabled: false, topK: 3 },
         observationalMemory: { enabled: true },
+      },
+      computerUseUpdates: {
+        enabled: true,
+        throttleMs: 3000,
+        onStepCompleted: true,
+        onStepFailed: true,
+        onCheckpoint: true,
+        onApprovalNeeded: true,
+        onGuidanceReceived: true,
+        onSessionCompleted: true,
+        onSessionFailed: true,
+      },
+    },
+    computerUse: {
+      enabled: true,
+      showStepLog: true,
+      defaultSurface: 'docked' as const,
+      defaultTarget: 'isolated-browser' as const,
+      approvalModeDefault: 'step' as const,
+      idleTimeoutSec: 180,
+      maxSessionDurationMin: 45,
+      models: {},
+      capture: {
+        fps: 2,
+        maxDimension: 1440,
+        jpegQuality: 0.8,
+        diffThreshold: 0.08,
+      },
+      safety: {
+        pauseOnExternalAuth: true,
+        pauseOnDownloads: true,
+        pauseOnDeletes: true,
+        pauseOnTerminal: true,
+        pauseOnClipboardPaste: true,
+        pauseOnSystemSettings: true,
+        manualTakeoverPauses: true,
+      },
+      localMacos: {
+        autoRequestPermissions: true,
+        autoOpenPrivacySettings: true,
+        allowedApps: [],
+        deniedApps: [],
+        allowedDisplays: [],
+        redactApps: [],
+      },
+      isolated: {
+        browserProfileDir: '~/.legionio/browser-profile',
+        downloadDir: '~/.legionio/downloads',
+        allowedDomains: ['*'],
+        persistentSession: true,
+      },
+      persistence: {
+        saveFrames: true,
+        saveVideo: false,
+        checkpointEveryActions: 3,
+        retainDays: 14,
+      },
+      overlay: {
+        enabled: true,
+        position: 'top' as const,
+        heightPx: 120,
+        opacity: 0.75,
       },
     },
     advanced: {
@@ -587,6 +649,7 @@ export function desktopConfigPayload(config: LegionConfig): Record<string, unkno
     ui: config.ui,
     audio: config.audio,
     realtime: config.realtime,
+    computerUse: config.computerUse,
     advanced: config.advanced,
     titleGeneration: config.titleGeneration,
     profiles: config.profiles,
@@ -663,24 +726,34 @@ export function registerConfigHandlers(
   onChanged?: (config: LegionConfig) => void,
 ): { setConfig: (path: string, value: unknown) => void } {
   let currentConfig = readEffectiveConfig(legionHome);
+  let lastBroadcastSnapshot = JSON.stringify(currentConfig);
 
   // Watch for external config changes
   const configPath = getDesktopSettingsPath(legionHome);
-  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let reloadDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let broadcastTimer: ReturnType<typeof setTimeout> | null = null;
 
-  const broadcastConfig = () => {
-    for (const win of BrowserWindow.getAllWindows()) {
-      win.webContents.send('config:changed', currentConfig);
-    }
+  const flushConfigBroadcast = () => {
+    broadcastTimer = null;
+    const snapshot = JSON.stringify(currentConfig);
+    if (snapshot === lastBroadcastSnapshot) return;
+
+    lastBroadcastSnapshot = snapshot;
+    broadcastToAllWindows('config:changed', currentConfig);
     onChanged?.(currentConfig);
   };
 
+  const scheduleConfigBroadcast = () => {
+    if (broadcastTimer) return;
+    broadcastTimer = setTimeout(flushConfigBroadcast, 25);
+  };
+
   const reloadConfig = () => {
-    if (debounceTimer) clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => {
+    if (reloadDebounceTimer) clearTimeout(reloadDebounceTimer);
+    reloadDebounceTimer = setTimeout(() => {
       try {
         currentConfig = readEffectiveConfig(legionHome);
-        broadcastConfig();
+        scheduleConfigBroadcast();
       } catch {
         // Ignore read errors during write
       }
@@ -701,7 +774,7 @@ export function registerConfigHandlers(
   const setConfigImpl = (path: string, value: unknown): void => {
     if (path === 'models') {
       currentConfig = readEffectiveConfig(legionHome);
-      broadcastConfig();
+      scheduleConfigBroadcast();
       return;
     }
 
@@ -721,14 +794,14 @@ export function registerConfigHandlers(
       }
 
       currentConfig = readEffectiveConfig(legionHome);
-      broadcastConfig();
+      scheduleConfigBroadcast();
       return;
     }
 
     setNestedValue(currentConfig as unknown as Record<string, unknown>, path, value);
     writeDesktopConfig(legionHome, currentConfig);
     currentConfig = readEffectiveConfig(legionHome);
-    broadcastConfig();
+    scheduleConfigBroadcast();
   };
 
   ipcMain.handle('config:get', () => {

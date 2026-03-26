@@ -1,5 +1,19 @@
 import { z } from 'zod';
 
+const computerUseSupportSchema = z.enum([
+  'openai-responses',
+  'anthropic-client-tool',
+  'gemini-computer-use',
+  'custom',
+  'none',
+]);
+
+const computerUseTargetSchema = z.enum(['isolated-browser', 'local-macos', 'isolated-vm']);
+
+const computerUseSurfaceSchema = z.enum(['docked', 'window']);
+
+const computerUseApprovalModeSchema = z.enum(['step', 'goal', 'autonomous']);
+
 const providerSchema = z.object({
   type: z.enum(['openai-compatible', 'anthropic', 'amazon-bedrock', 'google']),
   enabled: z.boolean().optional(),
@@ -23,6 +37,9 @@ const modelEntrySchema = z.object({
   deploymentName: z.string().optional(),
   maxInputTokens: z.number().positive().optional(),
   useResponsesApi: z.boolean().optional(),
+  computerUseSupport: computerUseSupportSchema.optional(),
+  visionCapable: z.boolean().optional(),
+  preferredTarget: computerUseTargetSchema.optional(),
 });
 
 const modelsConfigSchema = z.object({
@@ -177,6 +194,64 @@ const fallbackConfigSchema = z.object({
   modelKeys: z.array(z.string()),
 });
 
+const computerUseConfigSchema = z.object({
+  enabled: z.boolean(),
+  showStepLog: z.boolean(),
+  defaultSurface: computerUseSurfaceSchema,
+  defaultTarget: computerUseTargetSchema,
+  approvalModeDefault: computerUseApprovalModeSchema,
+  idleTimeoutSec: z.number().positive(),
+  maxSessionDurationMin: z.number().positive(),
+  models: z.object({
+    plannerModelKey: z.string().optional(),
+    driverModelKey: z.string().optional(),
+    verifierModelKey: z.string().optional(),
+    recoveryModelKey: z.string().optional(),
+  }),
+  capture: z.object({
+    fps: z.number().min(0.1).max(2),
+    maxDimension: z.number().positive(),
+    jpegQuality: z.number().min(0.1).max(1),
+    diffThreshold: z.number().min(0).max(1),
+  }),
+  safety: z.object({
+    pauseOnExternalAuth: z.boolean(),
+    pauseOnDownloads: z.boolean(),
+    pauseOnDeletes: z.boolean(),
+    pauseOnTerminal: z.boolean(),
+    pauseOnClipboardPaste: z.boolean(),
+    pauseOnSystemSettings: z.boolean(),
+    manualTakeoverPauses: z.boolean(),
+  }),
+  localMacos: z.object({
+    autoRequestPermissions: z.boolean(),
+    autoOpenPrivacySettings: z.boolean(),
+    allowedApps: z.array(z.string()),
+    deniedApps: z.array(z.string()),
+    allowedDisplays: z.array(z.string()),
+    redactApps: z.array(z.string()),
+  }),
+  isolated: z.object({
+    browserProfileDir: z.string(),
+    downloadDir: z.string(),
+    allowedDomains: z.array(z.string()),
+    persistentSession: z.boolean(),
+    remoteVmUrl: z.string().optional(),
+  }),
+  persistence: z.object({
+    saveFrames: z.boolean(),
+    saveVideo: z.boolean(),
+    checkpointEveryActions: z.number().positive(),
+    retainDays: z.number().positive(),
+  }),
+  overlay: z.object({
+    enabled: z.boolean(),
+    position: z.enum(['top', 'bottom']),
+    heightPx: z.number().min(60).max(300),
+    opacity: z.number().min(0.3).max(0.95),
+  }),
+});
+
 const azureAudioConfigSchema = z.object({
   endpoint: z.string().optional(),        // Custom TTS base URL (overrides region-based URL)
   region: z.string().optional(),          // e.g. "eastus" — used to construct standard Azure endpoints
@@ -249,6 +324,17 @@ const realtimeConfigSchema = z.object({
     }),
     observationalMemory: z.object({ enabled: z.boolean() }),
   }).optional(),
+  computerUseUpdates: z.object({
+    enabled: z.boolean(),
+    throttleMs: z.number().min(1000).max(30000),
+    onStepCompleted: z.boolean(),
+    onStepFailed: z.boolean(),
+    onCheckpoint: z.boolean(),
+    onApprovalNeeded: z.boolean(),
+    onGuidanceReceived: z.boolean(),
+    onSessionCompleted: z.boolean(),
+    onSessionFailed: z.boolean(),
+  }).optional(),
 });
 
 const pluginApprovalSchema = z.object({
@@ -284,6 +370,7 @@ export const legionConfigSchema = z.object({
   }),
   audio: audioConfigSchema,
   realtime: realtimeConfigSchema,
+  computerUse: computerUseConfigSchema,
   advanced: z.object({
     temperature: z.number().min(0).max(2),
     maxSteps: z.number().positive(),

@@ -1,4 +1,9 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type {
+  ComputerUseEvent,
+  ComputerUsePermissionSection,
+  ComputerUseSurface,
+} from '../shared/computer-use.js';
 
 export type LegionAPI = typeof legionAPI;
 
@@ -229,6 +234,33 @@ const legionAPI = {
   // Platform info
   platform: {
     homedir: () => ipcRenderer.invoke('platform:homedir'),
+  },
+
+  computerUse: {
+    startSession: (goal: string, options: unknown) => ipcRenderer.invoke('computer-use:start-session', goal, options),
+    pauseSession: (sessionId: string) => ipcRenderer.invoke('computer-use:pause-session', sessionId),
+    resumeSession: (sessionId: string) => ipcRenderer.invoke('computer-use:resume-session', sessionId),
+    stopSession: (sessionId: string) => ipcRenderer.invoke('computer-use:stop-session', sessionId),
+    approveAction: (sessionId: string, actionId: string) => ipcRenderer.invoke('computer-use:approve-action', sessionId, actionId),
+    rejectAction: (sessionId: string, actionId: string, reason?: string) => ipcRenderer.invoke('computer-use:reject-action', sessionId, actionId, reason),
+    listSessions: () => ipcRenderer.invoke('computer-use:list-sessions'),
+    getSession: (sessionId: string) => ipcRenderer.invoke('computer-use:get-session', sessionId),
+    setSurface: (sessionId: string, surface: ComputerUseSurface) => ipcRenderer.invoke('computer-use:set-surface', sessionId, surface),
+    sendGuidance: (sessionId: string, text: string) => ipcRenderer.invoke('computer-use:send-guidance', sessionId, text),
+    openSetupWindow: (conversationId?: string | null) => ipcRenderer.invoke('computer-use:open-setup-window', conversationId),
+    getLocalMacosPermissions: () => ipcRenderer.invoke('computer-use:get-local-macos-permissions'),
+    requestLocalMacosPermissions: () => ipcRenderer.invoke('computer-use:request-local-macos-permissions'),
+    openLocalMacosPrivacySettings: (section?: ComputerUsePermissionSection) => ipcRenderer.invoke('computer-use:open-local-macos-privacy-settings', section),
+    onEvent: (callback: (event: ComputerUseEvent) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: ComputerUseEvent) => callback(data);
+      ipcRenderer.on('computer-use:event', handler);
+      return () => ipcRenderer.removeListener('computer-use:event', handler);
+    },
+    onOverlayState: (callback: (state: unknown) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, data: unknown) => callback(data);
+      ipcRenderer.on('computer-use:overlay-state', handler);
+      return () => ipcRenderer.removeListener('computer-use:overlay-state', handler);
+    },
   },
 
   // Microphone recording (via main process for macOS permission compatibility)

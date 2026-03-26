@@ -27,6 +27,7 @@ import {
   MicOffIcon,
   ChevronUpIcon,
   PhoneIcon,
+  MonitorIcon,
 } from 'lucide-react';
 import { legion } from '@/lib/ipc-client';
 import { useAttachments } from '@/providers/AttachmentContext';
@@ -46,9 +47,17 @@ import { ProfileSelector } from './ProfileSelector';
 import { FallbackToggle } from './FallbackToggle';
 import { FallbackBanner } from './FallbackBanner';
 import { CallOverlay } from './CallOverlay';
+import { ComputerSessionPanel } from './ComputerSessionPanel';
+import { ComputerSetupPanel } from './ComputerSetupPanel';
+import { useComputerUse } from '@/providers/ComputerUseProvider';
+import { shouldShowComputerSetup, type ComputerSession } from '../../../shared/computer-use';
 const MATRIX_GLYPHS = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890@#$%^&*+-/~{[|`]}<>01';
 
+export type ThreadMode = 'chat' | 'computer';
+
 export const Thread: FC<{
+  mode: ThreadMode;
+  onChangeMode: (mode: ThreadMode) => void;
   selectedModelKey: string | null;
   onSelectModel: (key: string) => void;
   reasoningEffort: ReasoningEffort;
@@ -57,12 +66,11 @@ export const Thread: FC<{
   onSelectProfile: (key: string | null, primaryModelKey: string | null) => void;
   fallbackEnabled: boolean;
   onToggleFallback: (value: boolean) => void;
-}> = ({ selectedModelKey, onSelectModel, reasoningEffort, onChangeReasoningEffort, selectedProfileKey, onSelectProfile, fallbackEnabled, onToggleFallback }) => {
+}> = ({ mode, onChangeMode, selectedModelKey, onSelectModel, reasoningEffort, onChangeReasoningEffort, selectedProfileKey, onSelectProfile, fallbackEnabled, onToggleFallback }) => {
   const [searchOpen, setSearchOpen] = useState(false);
   const viewportRef = useRef<HTMLDivElement>(null);
   const { callState } = useRealtime();
 
-  // Listen for Cmd+F
   useEffect(() => {
     if (!window.legion?.onFind) return;
     const cleanup = window.legion.onFind(() => setSearchOpen(true));
@@ -70,29 +78,35 @@ export const Thread: FC<{
   }, []);
 
   return (
-    <ThreadPrimitive.Root className="flex h-full flex-col">
+    <ThreadPrimitive.Root className="flex h-full min-h-0 flex-col overflow-hidden">
       <SearchBar visible={searchOpen} onClose={() => setSearchOpen(false)} viewportRef={viewportRef} />
       <FallbackBanner />
-      <ThreadPrimitive.Viewport ref={viewportRef} className="relative flex-1 overflow-y-auto">
-        <ThreadPrimitive.Empty>
-          <MatrixRainBackground />
-        </ThreadPrimitive.Empty>
-        <div className="relative z-10 mx-auto flex min-h-full w-full max-w-5xl flex-col px-6 pt-8">
-          <ThreadWelcome />
-          <ThreadPrimitive.Messages
-            components={{
-              UserMessage,
-              AssistantMessage,
-            }}
-          />
+      <ThreadModeTabs mode={mode} onChange={onChangeMode} />
+      {mode === 'chat' ? (
+        <ThreadPrimitive.Viewport ref={viewportRef} className="relative min-h-0 flex-1 overflow-y-auto">
+          <ThreadPrimitive.Empty>
+            <MatrixRainBackground />
+          </ThreadPrimitive.Empty>
+          <div className="relative z-10 mx-auto flex min-h-full w-full max-w-5xl flex-col px-6 pt-8">
+            <ThreadWelcome />
+            <ThreadPrimitive.Messages
+              components={{
+                UserMessage,
+                AssistantMessage,
+              }}
+            />
 
-          <div className="min-h-8" />
-        </div>
-      </ThreadPrimitive.Viewport>
+            <div className="min-h-8" />
+          </div>
+        </ThreadPrimitive.Viewport>
+      ) : (
+        <ComputerTabSurface />
+      )}
       {callState.isInCall ? (
         <CallOverlay />
       ) : (
         <Composer
+          mode={mode}
           selectedModelKey={selectedModelKey}
           onSelectModel={onSelectModel}
           reasoningEffort={reasoningEffort}
@@ -104,6 +118,152 @@ export const Thread: FC<{
         />
       )}
     </ThreadPrimitive.Root>
+  );
+};
+
+const ThreadModeTabs: FC<{ mode: ThreadMode; onChange: (mode: ThreadMode) => void }> = ({ mode, onChange }) => {
+  const { config } = useConfig();
+  const computerUseEnabled = (config as Record<string, unknown> | null)?.computerUse
+    ? ((config as Record<string, unknown>).computerUse as { enabled?: boolean })?.enabled ?? false
+    : false;
+
+  if (!computerUseEnabled) return null;
+
+  return (
+    <div className="border-b border-border/70 bg-background/85 px-6 py-2 backdrop-blur-md">
+      <div className="mx-auto flex w-full max-w-5xl items-center gap-1.5">
+        <button
+          type="button"
+          onClick={() => onChange('chat')}
+          className={`rounded-xl px-3 py-1.5 text-xs font-medium transition-colors ${mode === 'chat' ? 'bg-primary text-primary-foreground' : 'border border-border/70 bg-card/60 text-muted-foreground hover:bg-muted/50'}`}
+        >
+          Chat
+        </button>
+        <button
+          type="button"
+          onClick={() => onChange('computer')}
+          className={`rounded-xl px-3 py-1.5 text-xs font-medium transition-colors ${mode === 'computer' ? 'bg-primary text-primary-foreground' : 'border border-border/70 bg-card/60 text-muted-foreground hover:bg-muted/50'}`}
+        >
+          Computer
+        </button>
+      </div>
+    </div>
+  );
+};
+
+function useActiveConversationId(): string | null {
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    legion.conversations.getActiveId()
+      .then((id) => {
+        if (!cancelled) setActiveConversationId(id as string | null);
+      })
+      .catch(() => {
+        if (!cancelled) setActiveConversationId(null);
+      });
+
+    const unsubscribe = legion.conversations.onChanged((store) => {
+      const payload = store as { activeConversationId?: string | null } | null;
+      if (!cancelled) {
+        setActiveConversationId(payload?.activeConversationId ?? null);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, []);
+
+  return activeConversationId;
+}
+
+function getActiveComputerSession(
+  conversationId: string | null,
+  sessionsByConversation: Map<string, ComputerSession[]>,
+): ComputerSession | undefined {
+  if (!conversationId) return undefined;
+  return sessionsByConversation.get(conversationId)?.[0];
+}
+
+const ComputerTabSurface: FC = () => {
+  const activeConversationId = useActiveConversationId();
+  const { sessionsByConversation } = useComputerUse();
+  const activeComputerSession = getActiveComputerSession(activeConversationId, sessionsByConversation);
+
+  if (!activeComputerSession) {
+    return (
+      <div className="min-h-0 flex-1 overflow-hidden px-6 py-4">
+        <div className="mx-auto flex h-full w-full max-w-5xl min-h-0 flex-col">
+          <div className="flex min-h-full flex-1 items-center justify-center rounded-2xl border border-dashed border-border/60 bg-card/20 px-6 py-8">
+            <div className="max-w-md text-center">
+              <MonitorIcon className="mx-auto h-8 w-8 text-muted-foreground/40" />
+              <div className="mt-3 text-sm font-medium">{activeConversationId ? 'No Active Session' : 'Select a Conversation'}</div>
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                {activeConversationId
+                  ? 'Configure a goal and start a session using the controls below.'
+                  : 'Choose or create a conversation from the sidebar first.'}
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-0 flex-1 overflow-hidden px-6 py-4">
+      <div className="mx-auto flex h-full w-full max-w-5xl min-h-0 flex-col">
+        <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+          <ComputerSessionPanel session={activeComputerSession} />
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const GuidanceComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
+  const [text, setText] = useState('');
+  const [isSending, setIsSending] = useState(false);
+  const { sendGuidance } = useComputerUse();
+
+  const handleSend = () => {
+    if (!text.trim() || isSending) return;
+    setIsSending(true);
+    void sendGuidance(sessionId, text.trim())
+      .then(() => setText(''))
+      .finally(() => setIsSending(false));
+  };
+
+  return (
+    <div className="rounded-[1.7rem] border border-border/70 bg-card/78 px-3 py-3 shadow-[inset_0_0_0_1px_rgba(197,194,245,0.08),0_12px_40px_rgba(5,4,15,0.18)]">
+      <div className="flex items-center gap-2">
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              handleSend();
+            }
+          }}
+          placeholder="Guide the session... (Enter to send)"
+          rows={1}
+          className="min-h-[36px] max-h-[120px] flex-1 resize-none bg-transparent px-1 py-1 text-sm outline-none placeholder:text-muted-foreground/50"
+        />
+        <button
+          type="button"
+          onClick={handleSend}
+          disabled={!text.trim() || isSending}
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
+        >
+          <SendHorizontalIcon className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    </div>
   );
 };
 
@@ -460,6 +620,28 @@ const AssistantTextPart: FC<{ text: string }> = ({ text }) => {
   return <div className="py-0.5"><MarkdownText text={text} /></div>;
 };
 
+/** Inline interrupt divider — shown where the user interrupted the AI's speech */
+const InterruptDivider: FC = () => (
+  <div className="my-2 flex items-center gap-2">
+    <div className="h-px flex-1 bg-amber-500/40" />
+    <div className="flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-0.5">
+      <SquareIcon className="h-2.5 w-2.5 text-amber-600 dark:text-amber-400" />
+      <span className="text-[10px] font-medium text-amber-600 dark:text-amber-400">Interrupted</span>
+    </div>
+    <div className="h-px flex-1 bg-amber-500/40" />
+  </div>
+);
+
+/** Struck-through text for the unspoken portion after an interrupt */
+const UnspokenTextPart: FC<{ text: string }> = ({ text }) => {
+  if (!text) return null;
+  return (
+    <div className="py-0.5 text-muted-foreground/50 line-through decoration-muted-foreground/30">
+      <MarkdownText text={text} />
+    </div>
+  );
+};
+
 const assistantContentComponents = {
   Text: AssistantTextPart,
   tools: {
@@ -477,6 +659,11 @@ const AssistantMessage: FC = () => {
   );
   const isEmpty = !isRunning && !hasContent;
 
+  // Check if this message has an interrupt (source: 'interrupt' or 'unspoken')
+  const hasInterrupt = content.some((p: { type: string; source?: string }) =>
+    p.type === 'text' && (p.source === 'interrupt' || p.source === 'unspoken'),
+  );
+
   return (
     <MessagePrimitive.Root className="group mb-8 flex justify-start">
       <div className="w-full max-w-4xl">
@@ -486,6 +673,16 @@ const AssistantMessage: FC = () => {
               <BanIcon className="h-3.5 w-3.5" />
               <span className="text-xs italic">Response cancelled</span>
             </div>
+          ) : hasInterrupt ? (
+            /* Render interrupted message with custom layout */
+            <>
+              {content.map((part: { type: string; text?: string; source?: string }, idx: number) => {
+                if (part.type !== 'text') return null;
+                if (part.source === 'interrupt') return <InterruptDivider key={`interrupt-${idx}`} />;
+                if (part.source === 'unspoken') return <UnspokenTextPart key={`unspoken-${idx}`} text={part.text ?? ''} />;
+                return <AssistantTextPart key={`text-${idx}`} text={part.text ?? ''} />;
+              })}
+            </>
           ) : (
             <>
               <MessagePrimitive.Content components={assistantContentComponents} />
@@ -926,6 +1123,7 @@ const CallButton: FC = () => {
 };
 
 const Composer: FC<{
+  mode: ThreadMode;
   selectedModelKey: string | null;
   onSelectModel: (key: string) => void;
   reasoningEffort: ReasoningEffort;
@@ -934,12 +1132,17 @@ const Composer: FC<{
   onSelectProfile: (key: string | null, primaryModelKey: string | null) => void;
   fallbackEnabled: boolean;
   onToggleFallback: (value: boolean) => void;
-}> = ({ selectedModelKey, onSelectModel, reasoningEffort, onChangeReasoningEffort, selectedProfileKey, onSelectProfile, fallbackEnabled, onToggleFallback }) => {
+}> = ({ mode, selectedModelKey, onSelectModel, reasoningEffort, onChangeReasoningEffort, selectedProfileKey, onSelectProfile, fallbackEnabled, onToggleFallback }) => {
   const { attachments, addAttachments, removeAttachment } = useAttachments();
   const { config } = useConfig();
+  const { sessionsByConversation } = useComputerUse();
+  const activeConversationId = useActiveConversationId();
   const dictationEnabled = (config as Record<string, unknown> | null)?.audio
     ? ((config as Record<string, unknown>).audio as { dictation?: { enabled?: boolean } })?.dictation?.enabled ?? true
     : true;
+
+  const activeComputerSession = getActiveComputerSession(activeConversationId, sessionsByConversation);
+  const showComputerSetup = shouldShowComputerSetup(activeComputerSession);
 
   const handleAttach = async () => {
     try {
@@ -951,74 +1154,99 @@ const Composer: FC<{
   return (
     <div className="relative z-20 border-t border-border/70 bg-background/88 px-6 pb-6 pt-4 backdrop-blur-md">
       <div className="mx-auto w-full max-w-5xl">
-      {attachments.length > 0 && (
-        <div className="mb-3 flex flex-wrap gap-2">
-          {attachments.map((file, i) => (
-            <div key={`${file.name}-${i}`} className="flex items-center gap-1.5 rounded-2xl border border-border/70 bg-card/65 px-2.5 py-2 text-xs group/att">
-              {file.isImage ? (
-                <img src={file.dataUrl} alt={file.name} className="h-10 w-10 rounded object-cover" />
-              ) : (
-                <FileIcon className="h-4 w-4 text-muted-foreground" />
-              )}
-              <div className="flex flex-col">
-                <span className="max-w-[120px] truncate font-medium">{file.name}</span>
-                <span className="text-[10px] text-muted-foreground">{(file.size / 1024).toFixed(1)} KB</span>
+        {mode === 'chat' && attachments.length > 0 && (
+          <div className="mb-3 flex flex-wrap gap-2">
+            {attachments.map((file, i) => (
+              <div key={`${file.name}-${i}`} className="group/att flex items-center gap-1.5 rounded-2xl border border-border/70 bg-card/65 px-2.5 py-2 text-xs">
+                {file.isImage ? (
+                  <img src={file.dataUrl} alt={file.name} className="h-10 w-10 rounded object-cover" />
+                ) : (
+                  <FileIcon className="h-4 w-4 text-muted-foreground" />
+                )}
+                <div className="flex flex-col">
+                  <span className="max-w-[120px] truncate font-medium">{file.name}</span>
+                  <span className="text-[10px] text-muted-foreground">{(file.size / 1024).toFixed(1)} KB</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => removeAttachment(i)}
+                  className="ml-1 rounded p-0.5 opacity-0 transition-opacity hover:bg-destructive/10 group-hover/att:opacity-100"
+                >
+                  <XIcon className="h-3 w-3 text-muted-foreground" />
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => removeAttachment(i)}
-                className="p-0.5 rounded hover:bg-destructive/10 opacity-0 group-hover/att:opacity-100 transition-opacity ml-1"
-              >
-                <XIcon className="h-3 w-3 text-muted-foreground" />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <ComposerPrimitive.Root className="flex flex-col gap-0 rounded-[1.7rem] border border-border/70 bg-card/78 px-3 py-3 shadow-[inset_0_0_0_1px_rgba(197,194,245,0.08),0_12px_40px_rgba(5,4,15,0.18)]">
-        <ComposerInput
-          placeholder="Message Interlink..."
-          className="min-h-[48px] max-h-[220px] w-full overflow-y-auto px-1 py-0.5 text-[15px]"
-          autoFocus
-        />
-        <div className="flex items-center justify-between">
-          <div className="flex min-w-0 items-center gap-2">
-            <button type="button" onClick={handleAttach} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-border/70 bg-card/70 transition-colors hover:bg-muted/50" title="Attach file">
-              <PaperclipIcon className="h-4 w-4 text-muted-foreground" />
-            </button>
-            {dictationEnabled && <DictationButton />}
-            <CallButton />
-            <ProfileSelector
-              selectedProfileKey={selectedProfileKey}
-              onSelectProfile={onSelectProfile}
-            />
-            <FallbackToggle
-              enabled={fallbackEnabled}
-              onToggle={onToggleFallback}
-            />
-            <ModelSelector
-              selectedModelKey={selectedModelKey}
-              onSelectModel={onSelectModel}
-              disabled={fallbackEnabled}
-            />
-            <ReasoningEffortSelector
-              value={reasoningEffort}
-              onChange={onChangeReasoningEffort}
-            />
+            ))}
           </div>
-          <ThreadPrimitive.If running={false}>
-            <ComposerPrimitive.Send asChild>
-              <button type="button" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40">
-                <SendHorizontalIcon className="h-4 w-4" />
-              </button>
-            </ComposerPrimitive.Send>
-          </ThreadPrimitive.If>
-          <ThreadPrimitive.If running>
-            <StopButton />
-          </ThreadPrimitive.If>
-        </div>
-      </ComposerPrimitive.Root>
+        )}
+
+        {mode === 'computer' && !showComputerSetup ? (
+          /* Guidance composer — shown when a session is active */
+          activeComputerSession ? (
+            <GuidanceComposer sessionId={activeComputerSession.id} />
+          ) : null
+        ) : (
+          <ComposerPrimitive.Root className="flex flex-col gap-0 rounded-[1.7rem] border border-border/70 bg-card/78 px-3 py-3 shadow-[inset_0_0_0_1px_rgba(197,194,245,0.08),0_12px_40px_rgba(5,4,15,0.18)]">
+            {mode === 'computer' ? (
+              <ComputerSetupPanel
+                conversationId={activeConversationId}
+                selectedModelKey={selectedModelKey}
+                onSelectModel={onSelectModel}
+                reasoningEffort={reasoningEffort}
+                onChangeReasoningEffort={onChangeReasoningEffort}
+                selectedProfileKey={selectedProfileKey}
+                onSelectProfile={onSelectProfile}
+                fallbackEnabled={fallbackEnabled}
+                onToggleFallback={onToggleFallback}
+                activeComputerSession={activeComputerSession}
+                onOpenPopout={() => { void legion.computerUse.openSetupWindow(activeConversationId ?? undefined); }}
+              />
+            ) : (
+              <>
+                <ComposerInput
+                  placeholder="Message Interlink..."
+                  className="min-h-[48px] max-h-[220px] w-full overflow-y-auto px-1 py-0.5 text-[15px]"
+                  autoFocus
+                />
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <button type="button" onClick={handleAttach} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-border/70 bg-card/70 transition-colors hover:bg-muted/50" title="Attach file">
+                      <PaperclipIcon className="h-4 w-4 text-muted-foreground" />
+                    </button>
+                    {dictationEnabled && <DictationButton />}
+                    <CallButton />
+                    <ProfileSelector
+                      selectedProfileKey={selectedProfileKey}
+                      onSelectProfile={onSelectProfile}
+                    />
+                    <FallbackToggle
+                      enabled={fallbackEnabled}
+                      onToggle={onToggleFallback}
+                    />
+                    <ModelSelector
+                      selectedModelKey={selectedModelKey}
+                      onSelectModel={onSelectModel}
+                      disabled={fallbackEnabled}
+                    />
+                    <ReasoningEffortSelector
+                      value={reasoningEffort}
+                      onChange={onChangeReasoningEffort}
+                    />
+                  </div>
+                  <ThreadPrimitive.If running={false}>
+                    <ComposerPrimitive.Send asChild>
+                      <button type="button" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40">
+                        <SendHorizontalIcon className="h-4 w-4" />
+                      </button>
+                    </ComposerPrimitive.Send>
+                  </ThreadPrimitive.If>
+                  <ThreadPrimitive.If running>
+                    <StopButton />
+                  </ThreadPrimitive.If>
+                </div>
+              </>
+            )}
+          </ComposerPrimitive.Root>
+        )}
       </div>
     </div>
   );

@@ -10,7 +10,7 @@ import { useConfig } from './ConfigProvider';
 import { createUnifiedSpeechAdapter, createUnifiedDictationAdapter, type AudioProvider } from '@/lib/audio/speech-adapters';
 
 type ContentPart =
-  | { type: 'text'; text: string; source?: 'assistant' | 'observer' }
+  | { type: 'text'; text: string; source?: 'assistant' | 'observer' | 'interrupt' | 'unspoken' }
   | { type: 'image'; image: string }
   | { type: 'file'; data: string; mimeType: string; filename: string }
   | {
@@ -212,6 +212,8 @@ let globalSubAgentVersion = 0; // bumped on every change to trigger re-renders
 // --- Stream accumulator functions ---
 
 const streamAccumulators = new Map<string, { messages: StoredMessage[]; headId: string | null }>();
+/** Conversations where the next assistant message should be forced-new (after realtime call reconnect) */
+const forceNewAssistant = new Set<string>();
 
 function getOrCreateAssistantInAcc(acc: { messages: StoredMessage[]; headId: string | null }): { msg: StoredMessage; idx: number } {
   const branch = getActiveBranch(acc.messages, acc.headId);
@@ -905,6 +907,23 @@ export function RuntimeProvider({
       const acc = streamAccumulators.get(convId)!;
 
       if (e.type === 'text-delta') {
+        // If a new realtime call started, force a fresh assistant message
+        if (forceNewAssistant.has(convId)) {
+          forceNewAssistant.delete(convId);
+          const branch = getActiveBranch(acc.messages, acc.headId);
+          const last = branch[branch.length - 1];
+          if (last?.role === 'assistant' && Array.isArray(last.content) && last.content.length > 0) {
+            const fresh: StoredMessage = {
+              id: msgId(),
+              parentId: acc.headId,
+              role: 'assistant',
+              content: [],
+              createdAt: new Date(),
+            };
+            acc.messages.push(fresh);
+            acc.headId = fresh.id;
+          }
+        }
         applyTextDelta(acc, e.text ?? '');
       } else if (e.type === 'realtime-user-transcript') {
         // Realtime audio: create/update a user message for spoken text
@@ -930,9 +949,42 @@ export function RuntimeProvider({
           acc.messages.push(userMsg);
           acc.headId = userMsg.id;
         }
+      } else if (e.type === 'realtime-interrupt') {
+        // User interrupted the AI response. Replace the assistant message content
+        // to show spoken text normally, then an interrupt marker, then unspoken text struck-through.
+        const payload = e as { spokenText?: string; unspokenText?: string };
+        const spokenText = payload.spokenText ?? '';
+        const unspokenText = payload.unspokenText ?? '';
+
+        // Find the current assistant message and replace its content
+        let assistantIdx = -1;
+        for (let i = acc.messages.length - 1; i >= 0; i--) {
+          if (acc.messages[i].role === 'assistant') { assistantIdx = i; break; }
+        }
+        if (assistantIdx >= 0) {
+          const newContent: ContentPart[] = [];
+          if (spokenText) newContent.push({ type: 'text', source: 'assistant', text: spokenText });
+          newContent.push({ type: 'text', source: 'interrupt', text: '[interrupted]' });
+          if (unspokenText) newContent.push({ type: 'text', source: 'unspoken', text: unspokenText });
+          acc.messages[assistantIdx] = { ...acc.messages[assistantIdx], content: toStoredContent(newContent) };
+        }
       } else if (e.type === 'realtime-status') {
-        // Realtime status changes — no accumulator action needed
-        // (RealtimeProvider handles status display)
+        const rtStatus = (e as { status?: string }).status;
+        // When a new realtime call connects, finalize the existing accumulator
+        // so the new call starts with a clean slate — prevents the new greeting
+        // from merging into the previous call's last assistant message.
+        if (rtStatus === 'connected' && acc.messages.length > 0) {
+          if (persistTimerRef.current) { clearTimeout(persistTimerRef.current); persistTimerRef.current = null; }
+          streamAccumulators.delete(convId);
+          forceNewAssistant.add(convId);
+          persistConversation(convId, acc.messages, acc.headId, {
+            lastAssistantUpdateAt: new Date().toISOString(),
+          });
+          if (isActiveConv) {
+            setTree([...acc.messages]);
+            setHeadId(acc.headId);
+          }
+        }
         return;
       } else if (e.type === 'observer-message') {
         applyObserverMessage(acc, e.text ?? '');

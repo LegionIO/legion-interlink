@@ -1,9 +1,11 @@
-import { useState, useCallback, useEffect, type FC } from 'react';
+import { useState, useCallback, useEffect, useRef, type FC } from 'react';
 import { ConfigProvider, useConfig } from '@/providers/ConfigProvider';
 import { AttachmentProvider } from '@/providers/AttachmentContext';
 import { RuntimeProvider, useSubAgents } from '@/providers/RuntimeProvider';
 import { RealtimeProvider } from '@/providers/RealtimeProvider';
-import { Thread } from '@/components/thread/Thread';
+import { Thread, type ThreadMode } from '@/components/thread/Thread';
+import { ComputerSessionPanel } from '@/components/thread/ComputerSessionPanel';
+import { ComputerSetupPanel } from '@/components/thread/ComputerSetupPanel';
 import { SubAgentThread } from '@/components/thread/SubAgentThread';
 import { DropZone } from '@/components/thread/DropZone';
 import { ConversationList } from '@/components/conversations/ConversationList';
@@ -12,21 +14,239 @@ import { SettingsPanel } from '@/components/settings/SettingsPanel';
 import { PluginProvider } from '@/providers/PluginProvider';
 import { PluginBannerSlot } from '@/components/plugins/PluginBannerSlot';
 import { PluginModalHost } from '@/components/plugins/PluginModalHost';
+import { ComputerUseProvider, useComputerUse } from '@/providers/ComputerUseProvider';
+import { OverlayShell } from '@/components/overlay/OverlayShell';
 import { CpuIcon, SettingsIcon } from 'lucide-react';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import type { ReasoningEffort } from '@/components/thread/ReasoningEffortSelector';
 import { legion } from '@/lib/ipc-client';
 import type { ConversationRecord } from '@/providers/RuntimeProvider';
+import { shouldShowComputerSetup, type ComputerSession, type ComputerUseSurface } from '../shared/computer-use';
 
 export default function App() {
   return (
     <ConfigProvider>
       <PluginProvider>
-        <AppShell />
+        <ComputerUseProvider>
+          <AppRoot />
+        </ComputerUseProvider>
       </PluginProvider>
     </ConfigProvider>
   );
 }
+
+function AppRoot() {
+  const search = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+  const isOperatorWindow = search?.get('operator') === '1';
+  const isOverlayWindow = search?.get('overlay') === '1';
+  const isComputerSetupWindow = isOperatorWindow && search?.get('setup') === '1';
+  const operatorSessionId = isOperatorWindow && !isComputerSetupWindow ? search.get('sessionId') : null;
+  const operatorConversationId = isComputerSetupWindow ? search?.get('conversationId') : null;
+  const overlaySessionId = isOverlayWindow ? search?.get('sessionId') ?? null : null;
+
+  if (overlaySessionId) {
+    return <OverlayShell sessionId={overlaySessionId} />;
+  }
+
+  if (isComputerSetupWindow) {
+    return <ComputerSetupShell preferredConversationId={operatorConversationId} />;
+  }
+
+  if (operatorSessionId) {
+    return <OperatorSessionShell sessionId={operatorSessionId} />;
+  }
+
+  return <AppShell />;
+}
+
+const OperatorSessionShell: FC<{ sessionId: string }> = ({ sessionId }) => {
+  const { sessions, setSurface } = useComputerUse();
+  const session = sessions.find((candidate) => candidate.id === sessionId) ?? null;
+
+  return (
+    <div className="h-screen overflow-hidden bg-background px-6 py-6 text-foreground">
+      <div className="mx-auto flex h-full min-h-0 w-full max-w-6xl flex-col gap-4">
+        <div className="flex items-center justify-between gap-3 rounded-2xl border border-border/70 bg-card/60 px-4 py-3">
+          <div>
+            <div className="text-sm font-semibold">Live Operator</div>
+            <div className="text-xs text-muted-foreground">{session?.goal ? `Goal: ${session.goal}` : 'Waiting for session...'}</div>
+          </div>
+          <button
+            type="button"
+            onClick={() => { void setSurface(sessionId, 'docked'); }}
+            className="rounded-xl border border-border/70 bg-card/70 px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted/50"
+          >
+            Return to Docked View
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+          {session ? (
+            <ComputerSessionPanel session={session} />
+          ) : (
+            <div className="rounded-2xl border border-dashed border-border/70 bg-card/40 px-6 py-12 text-center text-sm text-muted-foreground">
+              Waiting for computer session state...
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+function useOperatorConversationId(preferredConversationId?: string | null): string | null {
+  const [conversationId, setConversationId] = useState<string | null>(preferredConversationId ?? null);
+
+  useEffect(() => {
+    if (preferredConversationId) {
+      setConversationId(preferredConversationId);
+      return undefined;
+    }
+
+    let cancelled = false;
+    legion.conversations.getActiveId()
+      .then((id) => {
+        if (!cancelled) setConversationId(id);
+      })
+      .catch(() => {
+        if (!cancelled) setConversationId(null);
+      });
+
+    const unsubscribe = legion.conversations.onChanged((store) => {
+      if (cancelled) return;
+      const payload = store as { activeConversationId?: string | null } | null;
+      setConversationId(payload?.activeConversationId ?? null);
+    });
+
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [preferredConversationId]);
+
+  return conversationId;
+}
+
+const ComputerSetupShell: FC<{ preferredConversationId?: string | null }> = ({ preferredConversationId }) => {
+  const conversationId = useOperatorConversationId(preferredConversationId);
+  const { sessionsByConversation } = useComputerUse();
+  const activeComputerSession = getComputerSessionForConversation(conversationId, sessionsByConversation);
+  const showComputerSetup = shouldShowComputerSetup(activeComputerSession);
+  const [selectedModelKey, setSelectedModelKey] = useState<string | null>(null);
+  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('medium');
+  const [selectedProfileKey, setSelectedProfileKey] = useState<string | null>(null);
+  const [fallbackEnabled, setFallbackEnabled] = useState(false);
+  const [profilePrimaryModelKey, setProfilePrimaryModelKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!conversationId) {
+      setSelectedModelKey(null);
+      setSelectedProfileKey(null);
+      setFallbackEnabled(false);
+      setProfilePrimaryModelKey(null);
+      return;
+    }
+
+    let cancelled = false;
+    legion.conversations.get(conversationId)
+      .then((conversation) => {
+        if (cancelled) return;
+        const record = conversation as {
+          selectedModelKey?: string | null;
+          selectedProfileKey?: string | null;
+          fallbackEnabled?: boolean;
+          profilePrimaryModelKey?: string | null;
+        } | null;
+        setSelectedModelKey(record?.selectedModelKey ?? null);
+        setSelectedProfileKey(record?.selectedProfileKey ?? null);
+        setFallbackEnabled(record?.fallbackEnabled ?? false);
+        setProfilePrimaryModelKey(record?.profilePrimaryModelKey ?? null);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setSelectedModelKey(null);
+        setSelectedProfileKey(null);
+        setFallbackEnabled(false);
+        setProfilePrimaryModelKey(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [conversationId]);
+
+  useEffect(() => {
+    if (!conversationId) return;
+    legion.conversations.get(conversationId).then((conv: unknown) => {
+      const record = conv as Record<string, unknown> | null;
+      if (!record) return;
+      legion.conversations.put({
+        ...record,
+        selectedModelKey,
+        selectedProfileKey,
+        fallbackEnabled,
+        profilePrimaryModelKey,
+        updatedAt: new Date().toISOString(),
+      } as any);
+    }).catch(() => {});
+  }, [conversationId, fallbackEnabled, profilePrimaryModelKey, selectedModelKey, selectedProfileKey]);
+
+  const handleSelectProfile = useCallback((key: string | null, primaryModelKey: string | null) => {
+    setSelectedProfileKey(key);
+    setProfilePrimaryModelKey(primaryModelKey);
+    if (key !== null) {
+      setFallbackEnabled(true);
+      if (primaryModelKey) setSelectedModelKey(primaryModelKey);
+    } else {
+      setFallbackEnabled(false);
+      setSelectedModelKey(null);
+    }
+  }, []);
+
+  const handleToggleFallback = useCallback((enabled: boolean) => {
+    setFallbackEnabled(enabled);
+    if (enabled && selectedProfileKey && profilePrimaryModelKey) {
+      setSelectedModelKey(profilePrimaryModelKey);
+    }
+  }, [profilePrimaryModelKey, selectedProfileKey]);
+
+  return (
+    <div className="h-screen overflow-hidden bg-background px-6 py-6 text-foreground">
+      <div className="mx-auto flex h-full min-h-0 w-full max-w-6xl flex-col gap-4">
+        <div className="rounded-2xl border border-border/70 bg-card/60 px-4 py-3">
+          <div className="text-sm font-semibold">{showComputerSetup ? 'Computer Setup' : 'Computer Session'}</div>
+          <div className="text-xs text-muted-foreground">
+            {showComputerSetup
+              ? 'Configure your session here. Starting will open the live operator view.'
+              : 'A session is currently active. Setup options will return when it finishes.'}
+          </div>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+          <div className="rounded-[1.7rem] border border-border/70 bg-card/78 px-3 py-3 shadow-[inset_0_0_0_1px_rgba(197,194,245,0.08),0_12px_40px_rgba(5,4,15,0.18)]">
+            {showComputerSetup ? (
+              <ComputerSetupPanel
+                conversationId={conversationId}
+                selectedModelKey={selectedModelKey}
+                onSelectModel={setSelectedModelKey}
+                reasoningEffort={reasoningEffort}
+                onChangeReasoningEffort={setReasoningEffort}
+                selectedProfileKey={selectedProfileKey}
+                onSelectProfile={handleSelectProfile}
+                fallbackEnabled={fallbackEnabled}
+                onToggleFallback={handleToggleFallback}
+                startSurface="window"
+                activeComputerSession={activeComputerSession}
+              />
+            ) : activeComputerSession ? (
+              <ComputerSessionPanel session={activeComputerSession} />
+            ) : null}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const SIDEBAR_MIN_WIDTH = 240;
 const SIDEBAR_MAX_WIDTH = 520;
@@ -37,6 +257,14 @@ function clampSidebarWidth(width: number) {
 
 function getConversationDisplayTitle(conversation: Pick<ConversationRecord, 'title' | 'fallbackTitle'> | null) {
   return conversation?.title?.trim() || conversation?.fallbackTitle?.trim() || 'New Conversation';
+}
+
+function getComputerSessionForConversation(
+  conversationId: string | null | undefined,
+  sessionsByConversation: Map<string, ComputerSession[]>,
+): ComputerSession | undefined {
+  if (!conversationId) return undefined;
+  return sessionsByConversation.get(conversationId)?.[0];
 }
 
 function isDisposableNewConversation(conversation: ConversationRecord | null): boolean {
@@ -89,6 +317,7 @@ function AppShell() {
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [activeConversationTitle, setActiveConversationTitle] = useState('New Conversation');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [threadMode, setThreadMode] = useState<ThreadMode>('chat');
   const [selectedModelKey, setSelectedModelKey] = useState<string | null>(null);
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>('medium');
   const [selectedProfileKey, setSelectedProfileKey] = useState<string | null>(null);
@@ -327,9 +556,16 @@ function AppShell() {
         onModelFallback={setSelectedModelKey}
         onConversationSettingsLoaded={handleConversationSettingsLoaded}
       >
+      <ComputerUseAutoNavigator
+        activeConversationId={activeConversationId}
+        onRevealComputerSurface={() => {
+          setSettingsOpen(false);
+          setThreadMode('computer');
+        }}
+      />
       <RealtimeProvider>
         <PluginModalHost />
-        <div className="flex h-full bg-transparent text-foreground">
+        <div className="flex h-screen overflow-hidden bg-transparent text-foreground">
           {/* Sidebar */}
           <aside
             className="legion-shell-panel flex h-full shrink-0 flex-col border-r border-sidebar-border/80 bg-sidebar text-sidebar-foreground"
@@ -384,7 +620,7 @@ function AppShell() {
           </div>
 
           {/* Main content area */}
-          <main className="flex min-w-0 flex-1 flex-col">
+          <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
             <div className="titlebar-drag flex h-14 items-center justify-between border-b border-border/70 bg-background/85 px-6 backdrop-blur-md">
               <div className="titlebar-no-drag min-w-0">
                 {settingsOpen ? (
@@ -397,11 +633,13 @@ function AppShell() {
               </div>
             </div>
             <PluginBannerSlot />
-            <div className="flex-1 min-h-0">
+            <div className="min-h-0 flex-1 overflow-hidden">
               {settingsOpen ? (
                 <SettingsPanel onClose={() => setSettingsOpen(false)} />
               ) : (
                 <ThreadOrSubAgent
+                  mode={threadMode}
+                  onChangeMode={setThreadMode}
                   selectedModelKey={selectedModelKey}
                   onSelectModel={setSelectedModelKey}
                   reasoningEffort={reasoningEffort}
@@ -422,8 +660,57 @@ function AppShell() {
   );
 }
 
+const ComputerUseAutoNavigator: FC<{
+  activeConversationId: string | null;
+  onRevealComputerSurface: () => void;
+}> = ({ activeConversationId, onRevealComputerSurface }) => {
+  const { sessionsByConversation } = useComputerUse();
+  const { setActiveSubAgentView } = useSubAgents();
+  const hydratedRef = useRef(false);
+  const knownSessionsRef = useRef(new Map<string, { surface: ComputerUseSurface }>());
+  const activeSession = getComputerSessionForConversation(activeConversationId, sessionsByConversation) ?? null;
+
+  useEffect(() => {
+    const nextKnown = new Map<string, { surface: ComputerUseSurface }>();
+    for (const sessionList of sessionsByConversation.values()) {
+      for (const session of sessionList) {
+        nextKnown.set(session.id, { surface: session.surface });
+      }
+    }
+
+    if (!hydratedRef.current) {
+      knownSessionsRef.current = nextKnown;
+      hydratedRef.current = true;
+      return;
+    }
+
+    if (!activeSession) {
+      knownSessionsRef.current = nextKnown;
+      return;
+    }
+
+    const previous = knownSessionsRef.current.get(activeSession.id);
+    const shouldReveal = activeSession.surface === 'docked'
+      && activeSession.status !== 'completed'
+      && activeSession.status !== 'failed'
+      && activeSession.status !== 'stopped'
+      && (!previous || previous.surface !== 'docked');
+
+    knownSessionsRef.current = nextKnown;
+
+    if (!shouldReveal) return;
+
+    setActiveSubAgentView(null);
+    onRevealComputerSurface();
+  }, [activeSession, onRevealComputerSurface, sessionsByConversation, setActiveSubAgentView]);
+
+  return null;
+};
+
 /** Switches between the main Thread and a SubAgentThread view */
 const ThreadOrSubAgent: FC<{
+  mode: ThreadMode;
+  onChangeMode: (mode: ThreadMode) => void;
   selectedModelKey: string | null;
   onSelectModel: (key: string) => void;
   reasoningEffort: ReasoningEffort;
@@ -432,7 +719,7 @@ const ThreadOrSubAgent: FC<{
   onSelectProfile: (key: string | null, primaryModelKey: string | null) => void;
   fallbackEnabled: boolean;
   onToggleFallback: (value: boolean) => void;
-}> = ({ selectedModelKey, onSelectModel, reasoningEffort, onChangeReasoningEffort, selectedProfileKey, onSelectProfile, fallbackEnabled, onToggleFallback }) => {
+}> = ({ mode, onChangeMode, selectedModelKey, onSelectModel, reasoningEffort, onChangeReasoningEffort, selectedProfileKey, onSelectProfile, fallbackEnabled, onToggleFallback }) => {
   const { activeSubAgentView, setActiveSubAgentView } = useSubAgents();
 
   if (activeSubAgentView) {
@@ -446,6 +733,8 @@ const ThreadOrSubAgent: FC<{
 
   return (
     <Thread
+      mode={mode}
+      onChangeMode={onChangeMode}
       selectedModelKey={selectedModelKey}
       onSelectModel={onSelectModel}
       reasoningEffort={reasoningEffort}

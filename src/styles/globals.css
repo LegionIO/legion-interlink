@@ -307,3 +307,22 @@ html:not(.dark) .legion-gradient-text {
 .legion-settings-select::-ms-expand {
   display: none;
 }
+
+/* Computer Use Overlay — subtle breathing glow on the border */
+@keyframes overlay-border-pulse {
+  0%, 100% { border-color: rgba(168, 85, 247, 0.30); }
+  50% { border-color: rgba(168, 85, 247, 0.55); }
+}
+
+@keyframes overlay-icon-pulse {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
+}
+
+.overlay-pulse-border {
+  animation: overlay-border-pulse 3s ease-in-out infinite;
+}
+
+.overlay-pulse-icon {
+  animation: overlay-icon-pulse 2s ease-in-out infinite;
+}

@@ -13,6 +13,9 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { LegionConfig } from '../config/schema.js';
 import { findToolByName } from '../tools/naming.js';
 import type { ToolDefinition } from '../tools/types.js';
+import type { ComputerUseEvent } from '../../shared/computer-use.js';
+import { getExistingComputerUseManager } from '../computer-use/service.js';
+import type { IncomingMessage } from 'http';
 
 /* ── Types ── */
 
@@ -29,12 +32,14 @@ export type RealtimeEvent =
   | { type: 'input-speech'; speaking: boolean }
   | { type: 'response-started' }
   | { type: 'response-done' }
-  | { type: 'end-call-pending' };
+  | { type: 'end-call-pending' }
+  | { type: 'interrupt'; itemId: string; spokenText: string; unspokenText: string };
 
 /** Events broadcast on the agent:stream-event channel for RuntimeProvider integration */
 export type RealtimeStreamEvent =
   | { type: 'realtime-user-transcript'; conversationId: string; text: string; isFinal: boolean; itemId: string }
   | { type: 'text-delta'; conversationId: string; text: string; source: 'realtime' }
+  | { type: 'realtime-interrupt'; conversationId: string; spokenText: string; unspokenText: string }
   | { type: 'tool-call'; conversationId: string; toolCallId: string; toolName: string; args: unknown; startedAt: string; source: 'realtime' }
   | { type: 'tool-result'; conversationId: string; toolCallId: string; toolName: string; result: unknown; isError?: boolean; startedAt: string; finishedAt: string; source: 'realtime' }
   | { type: 'realtime-status'; conversationId: string; status: RealtimeSessionStatus; error?: string }
@@ -65,8 +70,21 @@ export class RealtimeSession {
   private _inResponse = false;
   private functionCallBuffers: Map<string, { name: string; args: string; itemId: string; callId: string }> = new Map();
 
+  /** Audio tracking for barge-in truncation */
+  private _currentAudioItemId: string | null = null;
+  private _currentAudioContentIndex: number = 0;
+  private _audioBytesSent: number = 0; // total PCM16 bytes sent for current item
+  /** Transcript snapshot at the moment of interruption (what was approximately spoken) */
+  private _interruptedSpokenText: string | null = null;
+  private _interruptedItemId: string | null = null;
+
   /** Pre-built memory context to inject into session instructions */
   private memoryContext: string = '';
+
+  /** Computer-use live tracking: session IDs started via tool calls during this realtime session */
+  private computerSessionIds = new Set<string>();
+  private computerEventCleanup: (() => void) | null = null;
+  private lastComputerUpdateAt = new Map<string, number>();
 
   /** Track partial transcripts keyed by item_id */
   private userTranscriptBuffers: Map<string, string> = new Map();
@@ -104,6 +122,7 @@ export class RealtimeSession {
     this._audioChunkCount = 0;
     this._serverEventCount = 0;
 
+    this.setupComputerUseTracking();
     this.setStatus('connecting');
 
     return new Promise<void>((resolve, reject) => {
@@ -153,7 +172,7 @@ export class RealtimeSession {
         });
 
         // Capture the actual HTTP response body on upgrade failure (400, 401, etc.)
-        this.ws.on('unexpected-response', (_req: unknown, res: import('http').IncomingMessage) => {
+        this.ws.on('unexpected-response', (_req: unknown, res: IncomingMessage) => {
           let body = '';
           res.on('data', (chunk: Buffer) => { body += chunk.toString(); });
           res.on('end', () => {
@@ -175,6 +194,7 @@ export class RealtimeSession {
   }
 
   close(): void {
+    this.teardownComputerUseTracking();
     if (this.ws) {
       try {
         this.ws.close(1000, 'Client closing');
@@ -214,6 +234,112 @@ export class RealtimeSession {
     // If connected, send an updated session config
     if (this.ws && this.ws.readyState === WS_OPEN) {
       this.sendSessionUpdate();
+    }
+  }
+
+  /* ── Computer-Use Live Tracking ── */
+
+  private setupComputerUseTracking(): void {
+    try {
+      const manager = getExistingComputerUseManager();
+      if (!manager) return;
+
+      const handler = (event: ComputerUseEvent) => {
+        if (!('sessionId' in event)) return;
+        const sessionId = (event as { sessionId: string }).sessionId;
+        if (!this.computerSessionIds.has(sessionId)) return;
+
+        const cfg = this.getFullConfig().realtime.computerUseUpdates;
+        if (cfg && !cfg.enabled) return;
+
+        const message = this.formatComputerEvent(event, cfg);
+        if (!message) return;
+
+        // Throttle (configurable, default 3s) — terminal events always pass
+        const now = Date.now();
+        const last = this.lastComputerUpdateAt.get(sessionId) ?? 0;
+        const throttleMs = cfg?.throttleMs ?? 3000;
+        const isTerminal = message.includes('completed') || message.includes('failed') || message.includes('stopped');
+        if (now - last < throttleMs && !isTerminal) return;
+
+        this.lastComputerUpdateAt.set(sessionId, now);
+        this.injectComputerUpdate(message);
+      };
+
+      manager.on('event', handler);
+      this.computerEventCleanup = () => manager.off('event', handler);
+    } catch {
+      // Computer-use module may not be available
+    }
+  }
+
+  private teardownComputerUseTracking(): void {
+    this.computerEventCleanup?.();
+    this.computerEventCleanup = null;
+    this.computerSessionIds.clear();
+    this.lastComputerUpdateAt.clear();
+  }
+
+  private formatComputerEvent(
+    event: ComputerUseEvent,
+    cfg?: LegionConfig['realtime']['computerUseUpdates'],
+  ): string | null {
+    switch (event.type) {
+      case 'session-updated': {
+        const s = event.session;
+        if (s.status === 'completed' && (cfg?.onSessionCompleted ?? true))
+          return `Computer session completed successfully. Goal was: "${s.goal}". Final subgoal: ${s.currentSubgoal ?? 'done'}.`;
+        if (s.status === 'failed' && (cfg?.onSessionFailed ?? true))
+          return `Computer session failed: ${s.lastError ?? 'unknown error'}. Goal was: "${s.goal}".`;
+        if (s.status === 'stopped')
+          return 'Computer session was stopped by the user.';
+        if (s.status === 'awaiting-approval' && (cfg?.onApprovalNeeded ?? true))
+          return `Computer session needs your approval: ${s.statusMessage ?? 'an action requires confirmation before proceeding'}.`;
+        return null;
+      }
+      case 'action-updated': {
+        const a = event.action;
+        if (a.status === 'completed' && (cfg?.onStepCompleted ?? true)) {
+          const details: string[] = [`${a.kind}`];
+          if (a.text) details.push(`typed "${a.text}"`);
+          if (a.url) details.push(`navigated to ${a.url}`);
+          if (a.appName) details.push(`in ${a.appName}`);
+          if (a.x != null && a.y != null) details.push(`at (${a.x}, ${a.y})`);
+          const desc = details.join(' ');
+          return `Step completed: ${desc}. ${a.rationale}${a.resultSummary ? ` Result: ${a.resultSummary}` : ''}`;
+        }
+        if (a.status === 'failed' && (cfg?.onStepFailed ?? true))
+          return `Step failed: ${a.kind} — ${a.error ?? 'unknown error'}. Was trying to: ${a.rationale}`;
+        return null;
+      }
+      case 'checkpoint':
+        if (!(cfg?.onCheckpoint ?? true)) return null;
+        return `Checkpoint reached: ${event.checkpoint.summary}. Criteria: ${event.checkpoint.successCriteria.join(', ')}.`;
+      case 'guidance-sent':
+        if (!(cfg?.onGuidanceReceived ?? true)) return null;
+        return `User guidance received: "${event.message.text}"`;
+      case 'error':
+        return `Computer session error: ${event.error}`;
+      default:
+        return null;
+    }
+  }
+
+  private injectComputerUpdate(text: string): void {
+    if (!this.ws || this.ws.readyState !== WS_OPEN) return;
+
+    this.ws.send(JSON.stringify({
+      type: 'conversation.item.create',
+      item: {
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text: `[Computer Session Update] ${text}` }],
+      },
+    }));
+
+    // Trigger a response so the model can react — but only if not already responding
+    if (!this._inResponse) {
+      this.ws.send(JSON.stringify({ type: 'response.create' }));
     }
   }
 
@@ -371,13 +497,37 @@ export class RealtimeSession {
         break;
       case 'session.updated':
         console.info('[RealtimeSession] Session updated');
+        // Inject a synthetic message to prompt the assistant to greet the user
+        if (this.ws?.readyState === WS_OPEN) {
+          this.ws.send(JSON.stringify({
+            type: 'conversation.item.create',
+            item: {
+              type: 'message',
+              role: 'user',
+              content: [{ type: 'input_text', text: '[Call has been answered]' }],
+            },
+          }));
+          this.ws.send(JSON.stringify({ type: 'response.create' }));
+        }
         break;
 
       case 'error': {
         const error = event.error as { message?: string; code?: string } | undefined;
         const msg = error?.message ?? 'Unknown realtime API error';
-        console.error('[RealtimeSession] Server error:', msg, error?.code);
-        this.broadcastRealtimeEvent({ type: 'status', status: 'error', error: msg });
+        const code = error?.code ?? '';
+        // Some errors are benign (e.g., cancelling a response that already finished)
+        // Only broadcast fatal status for connection/session-level errors
+        const benignCodes = [
+          'response_cancel_not_active',
+          'conversation_item_not_found',
+          'conversation_already_has_active_response',
+        ];
+        if (benignCodes.includes(code)) {
+          console.info('[RealtimeSession] Benign server error (ignored):', msg, code);
+        } else {
+          console.error('[RealtimeSession] Server error:', msg, code);
+          this.broadcastRealtimeEvent({ type: 'status', status: 'error', error: msg });
+        }
         break;
       }
 
@@ -386,6 +536,31 @@ export class RealtimeSession {
       case 'input_audio_buffer.speech_started':
         console.info('[RealtimeSession] VAD: speech started');
         this.broadcastRealtimeEvent({ type: 'input-speech', speaking: true });
+        // Barge-in: cancel the current AI response and truncate unplayed audio
+        if (this._inResponse && this.ws?.readyState === WS_OPEN) {
+          console.info('[RealtimeSession] Interrupting AI response (barge-in)');
+
+          // Snapshot the transcript at the moment of interruption — this is approximately what was spoken
+          if (this._currentAudioItemId) {
+            this._interruptedItemId = this._currentAudioItemId;
+            this._interruptedSpokenText = (this.assistantTranscriptBuffers.get(this._currentAudioItemId) ?? '').trim();
+          }
+
+          this.ws.send(JSON.stringify({ type: 'response.cancel' }));
+
+          // Truncate the model's audio to what the user actually heard
+          if (this._currentAudioItemId) {
+            const totalAudioMs = Math.round((this._audioBytesSent / 2) / 24000 * 1000);
+            const playedMs = Math.max(0, totalAudioMs - 500);
+            console.info(`[RealtimeSession] Truncating audio item ${this._currentAudioItemId} at ${playedMs}ms (total sent: ${totalAudioMs}ms)`);
+            this.ws.send(JSON.stringify({
+              type: 'conversation.item.truncate',
+              item_id: this._currentAudioItemId,
+              content_index: this._currentAudioContentIndex,
+              audio_end_ms: playedMs,
+            }));
+          }
+        }
         break;
 
       case 'input_audio_buffer.speech_stopped':
@@ -421,19 +596,68 @@ export class RealtimeSession {
 
       case 'response.created':
         this._inResponse = true;
+        this._currentAudioItemId = null;
+        this._audioBytesSent = 0;
+        this._interruptedItemId = null;
+        this._interruptedSpokenText = null;
         this.broadcastRealtimeEvent({ type: 'response-started' });
         break;
 
-      case 'response.done':
+      case 'response.done': {
         this._inResponse = false;
+        this._currentAudioItemId = null;
+        this._audioBytesSent = 0;
+
+        // Check if this was a cancelled response (barge-in interrupt)
+        const responseObj = event.response as { status?: string } | undefined;
+        if (responseObj?.status === 'cancelled' && this._interruptedItemId && this._interruptedSpokenText != null) {
+          // Get the full accumulated text (includes deltas that arrived after the interrupt)
+          const fullText = (this.assistantTranscriptBuffers.get(this._interruptedItemId) ?? '').trim();
+          const spokenText = this._interruptedSpokenText;
+          const unspokenText = fullText.length > spokenText.length
+            ? fullText.slice(spokenText.length).trim()
+            : '';
+
+          if (spokenText && unspokenText) {
+            console.info(`[RealtimeSession] Interrupt resolved: spoken=${spokenText.length} chars, unspoken=${unspokenText.length} chars`);
+            this.broadcastRealtimeEvent({
+              type: 'interrupt',
+              itemId: this._interruptedItemId,
+              spokenText,
+              unspokenText,
+            });
+            this.broadcastStreamEvent({
+              type: 'realtime-interrupt',
+              conversationId: this.conversationId,
+              spokenText,
+              unspokenText,
+            });
+          }
+        }
+
+        // Clear interrupt tracking
+        this._interruptedItemId = null;
+        this._interruptedSpokenText = null;
+
         this.broadcastRealtimeEvent({ type: 'response-done' });
         break;
+      }
 
       /* ── Audio output ── */
 
       case 'response.audio.delta': {
         const audioBase64 = event.delta as string;
         if (audioBase64) {
+          // Track item ID and accumulate audio bytes for truncation on barge-in
+          const itemId = event.item_id as string;
+          const contentIndex = (event.content_index as number) ?? 0;
+          if (itemId) {
+            this._currentAudioItemId = itemId;
+            this._currentAudioContentIndex = contentIndex;
+          }
+          // base64 → raw bytes: each base64 char = 6 bits, so length * 3/4 = bytes
+          this._audioBytesSent += Math.floor(audioBase64.length * 3 / 4);
+
           this.broadcastRealtimeEvent({ type: 'audio', audioBase64 });
         }
         break;
@@ -532,6 +756,41 @@ export class RealtimeSession {
         break;
       }
 
+      /* ── Content part lifecycle (authoritative transcript on done) ── */
+
+      case 'response.content_part.added':
+        // Content part started — no action needed (streaming deltas handle live display)
+        break;
+
+      case 'response.content_part.done': {
+        // Store the authoritative final transcript for this content part
+        const part = event.part as { type?: string; transcript?: string } | undefined;
+        const contentField = event.content as { type?: string; transcript?: string } | undefined;
+        const itemId = event.item_id as string;
+        const finalTranscript = (part?.transcript ?? contentField?.transcript ?? '').trim();
+        if (finalTranscript && itemId) {
+          this.assistantTranscriptBuffers.set(itemId, finalTranscript);
+          this.broadcastRealtimeEvent({
+            type: 'transcript', role: 'assistant', text: finalTranscript, isFinal: true, itemId,
+          });
+        }
+        break;
+      }
+
+      case 'response.audio.done':
+        // Audio stream finished for this content part — no action needed
+        break;
+
+      case 'response.output_item.added':
+      case 'conversation.item.created':
+        // Informational — item added to conversation. No action needed.
+        break;
+
+      case 'conversation.item.truncated':
+        // Confirmation that our truncation was applied. Logged for debugging.
+        console.info(`[RealtimeSession] Audio truncated: item=${event.item_id} at ${event.audio_end_ms}ms`);
+        break;
+
       default:
         // Log unhandled events so we can spot transcription failures or other issues
         console.info(`[RealtimeSession] Unhandled event: ${eventType} ${JSON.stringify(event).slice(0, 300)}`);
@@ -564,7 +823,10 @@ export class RealtimeSession {
 
     try {
       const args = safeParseJSON(argsJson);
-      const result = await tool.execute(args, { toolCallId: callId });
+      const result = await tool.execute(args, {
+        toolCallId: callId,
+        conversationId: this.conversationId,
+      });
       this.finishToolCall(callId, toolName, result, false, startedAt);
     } catch (err) {
       const errorResult = { error: err instanceof Error ? err.message : String(err) };
@@ -614,6 +876,14 @@ export class RealtimeSession {
       this.ws.send(JSON.stringify({
         type: 'response.create',
       }));
+
+      // Auto-track computer-use sessions started via tool calls
+      if (toolName === 'computer_use_session' && !isError) {
+        const sessionId = (result as { sessionId?: string })?.sessionId;
+        if (sessionId) {
+          this.computerSessionIds.add(sessionId);
+        }
+      }
     }
   }
 

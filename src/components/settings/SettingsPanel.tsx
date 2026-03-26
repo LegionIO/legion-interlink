@@ -13,6 +13,7 @@ import { McpSettings } from './McpSettings';
 import { SkillSettings } from './SkillSettings';
 import { AudioSettings } from './AudioSettings';
 import { RealtimeSettings } from './RealtimeSettings';
+import { ComputerUseSettings } from './ComputerUseSettings';
 import { DaemonSettings } from './DaemonSettings';
 import { DaemonExtensions } from './DaemonExtensions';
 import { DaemonTasks } from './DaemonTasks';
@@ -35,7 +36,7 @@ import { usePlugins } from '@/providers/PluginProvider';
 
 type SettingsSection =
   | 'models' | 'profiles' | 'memory' | 'compaction' | 'tools' | 'skills' | 'sub-agents' | 'system-prompt'
-  | 'audio' | 'realtime' | 'advanced' | 'mcp'
+  | 'audio' | 'realtime' | 'computer-use' | 'advanced' | 'mcp'
   | 'daemon' | 'extensions' | 'tasks' | 'workers' | 'schedules' | 'events' | 'audit'
   | 'prompts' | 'webhooks' | 'tenants' | 'capacity' | 'governance' | 'metrics' | 'doctor' | 'topology';
 
@@ -51,6 +52,7 @@ const sections: Array<{ key: SettingsSection; label: string; group?: string }> =
   { key: 'mcp', label: 'MCP Servers' },
   { key: 'audio', label: 'Audio' },
   { key: 'realtime', label: 'Realtime Audio' },
+  { key: 'computer-use', label: 'Computer Use' },
   { key: 'advanced', label: 'Advanced' },
   { key: 'daemon', label: 'Config', group: 'Legion Daemon' },
   { key: 'extensions', label: 'Extensions', group: 'Legion Daemon' },
@@ -187,6 +189,7 @@ export const SettingsPanel: FC<{ onClose: () => void }> = ({ onClose }) => {
         {activeSection === 'mcp' && <McpSettings config={config} updateConfig={updateConfig} />}
         {activeSection === 'audio' && <AudioSettings config={config} updateConfig={updateConfig} />}
         {activeSection === 'realtime' && <RealtimeSettings config={config} updateConfig={updateConfig} />}
+        {activeSection === 'computer-use' && <ComputerUseSettings config={config} updateConfig={updateConfig} />}
         {activeSection === 'advanced' && <AdvancedSettings config={config} updateConfig={updateConfig} />}
         {activeSection === 'daemon' && <DaemonSettings config={config} updateConfig={updateConfig} />}
         {activeSection === 'extensions' && <DaemonExtensions config={config} updateConfig={updateConfig} />}

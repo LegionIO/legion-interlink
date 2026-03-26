@@ -2,6 +2,8 @@ import type { IpcMain } from 'electron';
 import { BrowserWindow } from 'electron';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
+import type { LegionConfig } from '../config/schema.js';
+import { getComputerUseManager } from '../computer-use/service.js';
 
 type ConversationRecord = {
   id: string;
@@ -63,7 +65,7 @@ function broadcastConversationChange(store: ConversationsStore): void {
   }
 }
 
-export function registerConversationHandlers(ipcMain: IpcMain, legionHome: string): void {
+export function registerConversationHandlers(ipcMain: IpcMain, legionHome: string, getConfig?: () => LegionConfig): void {
   ipcMain.handle('conversations:list', () => {
     const store = readStore(legionHome);
     const conversations = Object.values(store.conversations);
@@ -97,11 +99,35 @@ export function registerConversationHandlers(ipcMain: IpcMain, legionHome: strin
     }
     writeStore(legionHome, store);
     broadcastConversationChange(store);
+
+    // Clean up associated computer-use sessions
+    if (getConfig) {
+      try {
+        const manager = getComputerUseManager(legionHome, getConfig);
+        manager.removeSessionsByConversation(id);
+      } catch {
+        // Computer-use module may not be initialized yet — safe to ignore
+      }
+    }
+
     return { ok: true };
   });
 
   ipcMain.handle('conversations:clear', () => {
     const store = readStore(legionHome);
+
+    // Clean up all computer-use sessions
+    if (getConfig) {
+      try {
+        const manager = getComputerUseManager(legionHome, getConfig);
+        for (const conversationId of Object.keys(store.conversations)) {
+          manager.removeSessionsByConversation(conversationId);
+        }
+      } catch {
+        // Safe to ignore
+      }
+    }
+
     store.conversations = {};
     store.activeConversationId = null;
     writeStore(legionHome, store);

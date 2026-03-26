@@ -1,6 +1,14 @@
 // Type-safe wrapper for the Electron IPC bridge exposed via preload
 // window.legion is set by electron/preload.ts via contextBridge
 
+import type {
+  ComputerUseEvent,
+  ComputerUsePermissions,
+  ComputerUsePermissionRequestResult,
+  ComputerUsePermissionSection,
+  ComputerUseSurface,
+} from '../../shared/computer-use';
+
 type DaemonResult<T = unknown> = { ok: boolean; data?: T; error?: string };
 
 type LegionAPI = {
@@ -154,6 +162,24 @@ type LegionAPI = {
   };
   platform: {
     homedir: () => Promise<string>;
+  };
+  computerUse: {
+    startSession: (goal: string, options: unknown) => Promise<unknown>;
+    pauseSession: (sessionId: string) => Promise<unknown>;
+    resumeSession: (sessionId: string) => Promise<unknown>;
+    stopSession: (sessionId: string) => Promise<unknown>;
+    approveAction: (sessionId: string, actionId: string) => Promise<unknown>;
+    rejectAction: (sessionId: string, actionId: string, reason?: string) => Promise<unknown>;
+    listSessions: () => Promise<unknown[]>;
+    getSession: (sessionId: string) => Promise<unknown>;
+    setSurface: (sessionId: string, surface: ComputerUseSurface) => Promise<unknown>;
+    sendGuidance: (sessionId: string, text: string) => Promise<unknown>;
+    openSetupWindow: (conversationId?: string | null) => Promise<unknown>;
+    getLocalMacosPermissions: () => Promise<ComputerUsePermissions>;
+    requestLocalMacosPermissions: () => Promise<ComputerUsePermissionRequestResult>;
+    openLocalMacosPrivacySettings: (section?: ComputerUsePermissionSection) => Promise<{ opened: ComputerUsePermissionSection | null }>;
+    onEvent: (callback: (event: ComputerUseEvent) => void) => () => void;
+    onOverlayState: (callback: (state: unknown) => void) => () => void;
   };
   mic: {
     listDevices: () => Promise<Array<{ deviceId: string; label: string }>>;

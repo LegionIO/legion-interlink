@@ -28,6 +28,17 @@ type RealtimeConfig = {
     semanticRecall?: { enabled?: boolean; topK?: number };
     observationalMemory?: { enabled?: boolean };
   };
+  computerUseUpdates?: {
+    enabled?: boolean;
+    throttleMs?: number;
+    onStepCompleted?: boolean;
+    onStepFailed?: boolean;
+    onCheckpoint?: boolean;
+    onApprovalNeeded?: boolean;
+    onGuidanceReceived?: boolean;
+    onSessionCompleted?: boolean;
+    onSessionFailed?: boolean;
+  };
 };
 
 // ─── Password Field ──────────────────────────────────────────────────────────
@@ -508,6 +519,29 @@ export const RealtimeSettings: FC<SettingsProps> = ({ config, updateConfig }) =>
           </div>
         )}
       </div>
+
+      {/* Computer Use Updates */}
+      <fieldset className="rounded-lg border p-3 space-y-3">
+        <legend className="text-xs font-semibold px-1">Computer Use Updates</legend>
+        <div className="rounded-md border border-border/60 bg-card/50 px-3 py-2 text-xs text-muted-foreground">
+          When a computer-use session is started during a realtime call, updates are streamed back so the voice AI can narrate progress.
+        </div>
+        <Toggle label="Enabled" checked={realtime?.computerUseUpdates?.enabled ?? true} onChange={(v) => updateConfig('realtime.computerUseUpdates.enabled', v)} />
+        {(realtime?.computerUseUpdates?.enabled ?? true) && (
+          <>
+            <NumberField label="Throttle (ms)" value={realtime?.computerUseUpdates?.throttleMs ?? 3000} onChange={(v) => updateConfig('realtime.computerUseUpdates.throttleMs', v)} min={1000} max={30000} />
+            <div className="grid grid-cols-2 gap-2">
+              <Toggle label="Step completed" checked={realtime?.computerUseUpdates?.onStepCompleted ?? true} onChange={(v) => updateConfig('realtime.computerUseUpdates.onStepCompleted', v)} />
+              <Toggle label="Step failed" checked={realtime?.computerUseUpdates?.onStepFailed ?? true} onChange={(v) => updateConfig('realtime.computerUseUpdates.onStepFailed', v)} />
+              <Toggle label="Checkpoint" checked={realtime?.computerUseUpdates?.onCheckpoint ?? true} onChange={(v) => updateConfig('realtime.computerUseUpdates.onCheckpoint', v)} />
+              <Toggle label="Approval needed" checked={realtime?.computerUseUpdates?.onApprovalNeeded ?? true} onChange={(v) => updateConfig('realtime.computerUseUpdates.onApprovalNeeded', v)} />
+              <Toggle label="Guidance received" checked={realtime?.computerUseUpdates?.onGuidanceReceived ?? true} onChange={(v) => updateConfig('realtime.computerUseUpdates.onGuidanceReceived', v)} />
+              <Toggle label="Session completed" checked={realtime?.computerUseUpdates?.onSessionCompleted ?? true} onChange={(v) => updateConfig('realtime.computerUseUpdates.onSessionCompleted', v)} />
+              <Toggle label="Session failed" checked={realtime?.computerUseUpdates?.onSessionFailed ?? true} onChange={(v) => updateConfig('realtime.computerUseUpdates.onSessionFailed', v)} />
+            </div>
+          </>
+        )}
+      </fieldset>
     </div>
   );
 };

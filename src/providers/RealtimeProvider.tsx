@@ -21,6 +21,46 @@ import { useConfig } from './ConfigProvider';
 import { RealtimeAudioPlayer } from '@/lib/audio/realtime-playback';
 import { Ringtone } from '@/lib/audio/ringtone';
 
+/* ── Disconnect Tone ── */
+
+/** Play a short descending two-tone to signal call disconnection. */
+function playDisconnectTone(outputDeviceId?: string): void {
+  try {
+    const ctx = new AudioContext();
+    if (outputDeviceId) {
+      const ctxWithSink = ctx as AudioContext & { setSinkId?: (id: string) => Promise<void> };
+      if (typeof ctxWithSink.setSinkId === 'function') {
+        void ctxWithSink.setSinkId(outputDeviceId);
+      }
+    }
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.12, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
+    gain.connect(ctx.destination);
+
+    // First tone: 480Hz for 200ms
+    const osc1 = ctx.createOscillator();
+    osc1.frequency.value = 480;
+    osc1.type = 'sine';
+    osc1.connect(gain);
+    osc1.start(ctx.currentTime);
+    osc1.stop(ctx.currentTime + 0.2);
+
+    // Second tone: 380Hz for 300ms (lower pitch = "hanging up" feel)
+    const osc2 = ctx.createOscillator();
+    osc2.frequency.value = 380;
+    osc2.type = 'sine';
+    osc2.connect(gain);
+    osc2.start(ctx.currentTime + 0.22);
+    osc2.stop(ctx.currentTime + 0.52);
+
+    // Auto-close context after tones finish
+    setTimeout(() => { void ctx.close(); }, 700);
+  } catch {
+    // Audio context may fail in some environments — ignore silently
+  }
+}
+
 /* ── Types ── */
 
 export type RealtimeCallStatus = 'idle' | 'preparing' | 'connecting' | 'connected' | 'disconnected' | 'error';
@@ -90,6 +130,9 @@ export const RealtimeProvider: FC<PropsWithChildren> = ({ children }) => {
   // Cleanup function for ending a call
   const cleanup = useCallback(() => {
     callActiveRef.current = false;
+
+    // Play disconnect tone before tearing everything down
+    playDisconnectTone(realtimeConfig?.outputDeviceId);
 
     // Stop ringtone
     if (ringDelayTimerRef.current) {
@@ -337,6 +380,8 @@ export const RealtimeProvider: FC<PropsWithChildren> = ({ children }) => {
           const speaking = e.speaking as boolean;
           if (speaking) {
             lastUserSpeechRef.current = Date.now();
+            // Barge-in: stop AI audio playback immediately when user starts speaking
+            playerRef.current?.stop();
           }
           setCallState((prev) => ({
             ...prev,
