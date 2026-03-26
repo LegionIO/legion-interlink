@@ -27,6 +27,17 @@ import {
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * Maximum pixel dimension (longest side) for screenshots sent to the AI model.
+ * Vision models internally downscale large images and then output coordinates in
+ * that smaller space.  By resizing to a known size up-front we ensure the
+ * model's coordinate output matches the frame dimensions stored in the session,
+ * and the existing toDesktopPoint() math correctly scales them back to the real
+ * desktop resolution.  1920 is chosen because it matches common display widths
+ * where computer-use is already known to work reliably.
+ */
+const MAX_FRAME_DIMENSION = 1920;
+
 const LOCAL_MACOS_HELPER_COMMANDS = {
   permissions: 'permissions',
   move: 'move',
@@ -218,6 +229,34 @@ async function resolveFrameSize(data: Buffer): Promise<{ width: number; height: 
   return desktopSize ?? { width: 1440, height: 900 };
 }
 
+/**
+ * Downscale a screenshot so its longest side fits within MAX_FRAME_DIMENSION.
+ * If the image already fits, it is returned unchanged.
+ */
+function downscaleFrame(
+  data: Buffer,
+  originalSize: { width: number; height: number },
+): { data: Buffer; width: number; height: number } {
+  const longest = Math.max(originalSize.width, originalSize.height);
+  if (longest <= MAX_FRAME_DIMENSION) {
+    return { data, width: originalSize.width, height: originalSize.height };
+  }
+
+  const scale = MAX_FRAME_DIMENSION / longest;
+  const targetWidth = Math.round(originalSize.width * scale);
+  const targetHeight = Math.round(originalSize.height * scale);
+
+  const image = nativeImage.createFromBuffer(data);
+  const resized = image.resize({ width: targetWidth, height: targetHeight, quality: 'better' });
+  const jpegBuffer = resized.toJPEG(85);
+
+  return {
+    data: Buffer.from(jpegBuffer),
+    width: targetWidth,
+    height: targetHeight,
+  };
+}
+
 export class LocalMacosHarness implements ComputerHarness {
   readonly target = 'local-macos' as const;
 
@@ -243,16 +282,17 @@ export class LocalMacosHarness implements ComputerHarness {
     const outputPath = join(dir, `${session.id}.jpg`);
     try {
       await execFileAsync('screencapture', ['-x', '-t', 'jpg', outputPath], { timeout: 15000 });
-      const data = await readFile(outputPath);
-      const size = await resolveFrameSize(data);
+      const rawData = await readFile(outputPath);
+      const rawSize = await resolveFrameSize(rawData);
+      const frame = downscaleFrame(rawData, rawSize);
       return {
         id: makeComputerUseId('frame'),
         sessionId: session.id,
         createdAt: nowIso(),
         mimeType: 'image/jpeg',
-        dataUrl: `data:image/jpeg;base64,${data.toString('base64')}`,
-        width: size.width,
-        height: size.height,
+        dataUrl: `data:image/jpeg;base64,${frame.data.toString('base64')}`,
+        width: frame.width,
+        height: frame.height,
         source: 'local-macos',
       };
     } finally {

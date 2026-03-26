@@ -61,6 +61,8 @@ export type LocalMacosHelperResponse = {
   accessibilityTrusted?: boolean;
   screenRecordingGranted?: boolean;
   automationGranted?: boolean;
+  desktopCoordinateWidth?: number;
+  desktopCoordinateHeight?: number;
   desktopWidth?: number;
   desktopHeight?: number;
   pointerX?: number;

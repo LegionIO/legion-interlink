@@ -22,6 +22,14 @@ func desktopBounds() -> CGRect {
   CGDisplayBounds(primaryDisplayID())
 }
 
+func desktopCoordinateWidth() -> Int {
+  Int(desktopBounds().width.rounded())
+}
+
+func desktopCoordinateHeight() -> Int {
+  Int(desktopBounds().height.rounded())
+}
+
 func desktopPixelWidth() -> Int {
   Int(CGDisplayPixelsWide(primaryDisplayID()))
 }
@@ -336,6 +344,8 @@ case "permissions":
     "accessibilityTrusted": AXIsProcessTrusted(),
     "screenRecordingGranted": CGPreflightScreenCaptureAccess(),
     "automationGranted": true,
+    "desktopCoordinateWidth": desktopCoordinateWidth(),
+    "desktopCoordinateHeight": desktopCoordinateHeight(),
     "desktopWidth": desktopPixelWidth(),
     "desktopHeight": desktopPixelHeight(),
   ]
@@ -349,6 +359,8 @@ case "requestScreenRecording":
   printJson([
     "ok": true,
     "screenRecordingGranted": granted,
+    "desktopCoordinateWidth": desktopCoordinateWidth(),
+    "desktopCoordinateHeight": desktopCoordinateHeight(),
     "desktopWidth": desktopPixelWidth(),
     "desktopHeight": desktopPixelHeight(),
   ])

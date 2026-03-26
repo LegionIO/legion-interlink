@@ -53,21 +53,25 @@ const ScreenshotTimer: FC<{
  * Purple circle that follows the AI cursor position on the macOS screen.
  * Includes a click ripple animation when the AI clicks.
  *
- * cursor.x/y are in Quartz logical-point coordinates (origin = top-left of
- * full display including menu bar). The overlay window may be constrained by
- * macOS to the work area (excluding menu bar + dock), so we subtract the
- * workArea offset passed from the main process.
+ * cursor.x/y are in frame-space coordinates (i.e. the screenshot image
+ * dimensions). When the frame is smaller than the actual display (e.g. a
+ * downscaled screenshot), we scale to screen-space so the indicator lands at
+ * the correct position on the overlay window which covers the full display.
  */
 const CursorIndicator: FC<{
   cursor: NonNullable<ComputerOverlayState['cursor']>;
-}> = ({ cursor }) => {
+  frameWidth?: number;
+  frameHeight?: number;
+  screenWidth?: number;
+  screenHeight?: number;
+}> = ({ cursor, frameWidth, frameHeight, screenWidth, screenHeight }) => {
   if (!cursor.visible) return null;
 
-  // cursor.x/y are in Quartz logical-point coordinates (origin = top-left of
-  // full display). The overlay window covers the full display bounds, so we
-  // use cursor.x/y directly as pixel positions.
-  const left = cursor.x;
-  const top = cursor.y;
+  // Scale cursor from frame-space to screen-space when dimensions differ.
+  const scaleX = frameWidth && screenWidth && frameWidth > 0 ? screenWidth / frameWidth : 1;
+  const scaleY = frameHeight && screenHeight && frameHeight > 0 ? screenHeight / frameHeight : 1;
+  const left = cursor.x * scaleX;
+  const top = cursor.y * scaleY;
 
   const clickedRecently = cursor.clickedAt
     ? Date.now() - new Date(cursor.clickedAt).getTime() < 800
@@ -189,7 +193,13 @@ export const OverlayContent: FC<{ state: ComputerOverlayState }> = ({ state }) =
 
       {/* AI cursor indicator — purple circle on screen */}
       {state.cursor?.visible && (
-        <CursorIndicator cursor={state.cursor} />
+        <CursorIndicator
+          cursor={state.cursor}
+          frameWidth={state.frameWidth}
+          frameHeight={state.frameHeight}
+          screenWidth={state.screenWidth}
+          screenHeight={state.screenHeight}
+        />
       )}
     </div>
   );
