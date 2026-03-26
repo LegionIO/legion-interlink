@@ -618,6 +618,7 @@ function AppShell() {
               <div className="min-h-0 flex-1 overflow-y-auto">
                 <ConversationList
                   activeConversationId={activeConversationId}
+                  activeThreadMode={threadMode}
                   onSwitchConversation={handleSwitchConversation}
                   onNewConversation={handleNewConversation}
                 />

@@ -14,6 +14,7 @@ type ConversationSummary = Pick<
 
 type ConversationListProps = {
   activeConversationId: string | null;
+  activeThreadMode?: 'chat' | 'computer';
   onSwitchConversation: (id: string) => void;
   onNewConversation: () => Promise<void> | void;
 };
@@ -122,6 +123,7 @@ const ConversationDeleteButton: FC<{ onDelete: () => Promise<void>; isDeleting: 
 
 export const ConversationList: FC<ConversationListProps> = ({
   activeConversationId,
+  activeThreadMode,
   onSwitchConversation,
   onNewConversation,
 }) => {
@@ -140,6 +142,16 @@ export const ConversationList: FC<ConversationListProps> = ({
     if (latest.status === 'completed' && !latest.completionSeen) return 'completed';
     return null;
   }, [sessionsByConversation]);
+
+  // Mark computer-use sessions as seen when the user is viewing the Computer tab
+  useEffect(() => {
+    if (!activeConversationId || activeThreadMode !== 'computer') return;
+    const sessions = sessionsByConversation.get(activeConversationId);
+    const hasUnseen = sessions?.some((s) => s.status === 'completed' && !s.completionSeen);
+    if (hasUnseen) {
+      void legion.computerUse.markSessionsSeen(activeConversationId);
+    }
+  }, [activeConversationId, activeThreadMode, sessionsByConversation]);
 
   const loadConversations = async () => {
     try {
@@ -232,8 +244,6 @@ export const ConversationList: FC<ConversationListProps> = ({
     if (conv?.hasUnread) {
       await legion.conversations.put({ ...conv, hasUnread: false });
     }
-    // Mark completed computer-use sessions as seen (persisted to disk)
-    void legion.computerUse.markSessionsSeen(id);
     onSwitchConversation(id);
   };
 
@@ -326,7 +336,7 @@ export const ConversationList: FC<ConversationListProps> = ({
                 {hasUnread && <div className="h-2 w-2 rounded-full bg-primary shadow-[0_0_10px_rgba(197,194,245,0.38)]" />}
                 {isRunning && <TypingBubble />}
                 {computerStatus === 'running' && <ComputerActiveIndicator />}
-                {computerStatus === 'completed' && !isActive && <ComputerCompletedIndicator />}
+                {computerStatus === 'completed' && !(isActive && activeThreadMode === 'computer') && <ComputerCompletedIndicator />}
                 <ConversationDeleteButton
                   onDelete={() => handleDelete(conv.id)}
                   isDeleting={deletingId === conv.id}
