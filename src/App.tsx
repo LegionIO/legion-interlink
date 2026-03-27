@@ -15,12 +15,15 @@ import { KnowledgePanel } from '@/components/knowledge/KnowledgePanel';
 import { GitHubPanel } from '@/components/github/GitHubPanel';
 import { MarketplacePanel } from '@/components/marketplace/MarketplacePanel';
 import { CommandBar } from '@/components/CommandBar';
+import { NotificationPanel } from '@/components/notifications/NotificationPanel';
+import { ToastContainer } from '@/components/notifications/ToastContainer';
+import { NotificationProvider, useNotifications } from '@/providers/NotificationProvider';
 import { PluginProvider } from '@/providers/PluginProvider';
 import { PluginBannerSlot } from '@/components/plugins/PluginBannerSlot';
 import { PluginModalHost } from '@/components/plugins/PluginModalHost';
 import { ComputerUseProvider, useComputerUse } from '@/providers/ComputerUseProvider';
 import { OverlayShell } from '@/components/overlay/OverlayShell';
-import { BookOpenIcon, CpuIcon, GitBranchIcon, PuzzleIcon, SettingsIcon } from 'lucide-react';
+import { BellIcon, BookOpenIcon, CpuIcon, GitBranchIcon, PuzzleIcon, SettingsIcon } from 'lucide-react';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import type { ReasoningEffort } from '@/components/thread/ReasoningEffortSelector';
 import { legion } from '@/lib/ipc-client';
@@ -32,7 +35,9 @@ export default function App() {
     <ConfigProvider>
       <PluginProvider>
         <ComputerUseProvider>
-          <AppRoot />
+          <NotificationProvider>
+            <AppRoot />
+          </NotificationProvider>
         </ComputerUseProvider>
       </PluginProvider>
     </ConfigProvider>
@@ -335,9 +340,10 @@ async function cleanupEmptyConversations(
   }
 }
 
-type AppView = 'chat' | 'settings' | 'knowledge' | 'github' | 'marketplace';
+type AppView = 'chat' | 'settings' | 'knowledge' | 'github' | 'marketplace' | 'notifications';
 
 function AppShell() {
+  const { unreadCount } = useNotifications();
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [activeConversationTitle, setActiveConversationTitle] = useState('New Conversation');
   const [activeView, setActiveView] = useState<AppView>('chat');
@@ -621,6 +627,7 @@ function AppShell() {
       <RealtimeProvider>
         <PluginModalHost />
         <CommandBar open={commandBarOpen} onClose={() => setCommandBarOpen(false)} />
+        <ToastContainer />
         <div className="flex h-screen overflow-hidden bg-transparent text-foreground">
           {/* Sidebar */}
           <aside
@@ -680,6 +687,19 @@ function AppShell() {
                 >
                   <PuzzleIcon className="h-4 w-4" />
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveView(activeView === 'notifications' ? 'chat' : 'notifications')}
+                  className={`relative rounded-md p-1.5 transition-colors hover:bg-sidebar-accent/80 ${activeView === 'notifications' ? 'bg-primary/15 text-primary' : 'text-muted-foreground'}`}
+                  title="Notifications"
+                >
+                  <BellIcon className="h-4 w-4" />
+                  {unreadCount > 0 && (
+                    <span className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-red-500 px-1 text-[8px] font-bold text-white">
+                      {unreadCount > 99 ? '99+' : unreadCount}
+                    </span>
+                  )}
+                </button>
                 <ThemeToggle />
               </div>
             </div>
@@ -712,6 +732,8 @@ function AppShell() {
                   <span className="text-sm font-medium text-foreground">GitHub</span>
                 ) : activeView === 'marketplace' ? (
                   <span className="text-sm font-medium text-foreground">Extensions</span>
+                ) : activeView === 'notifications' ? (
+                  <span className="text-sm font-medium text-foreground">Notifications</span>
                 ) : (
                   <span className="block truncate text-sm font-medium text-foreground">
                     {activeConversationTitle}
@@ -729,6 +751,8 @@ function AppShell() {
                 <GitHubPanel onClose={() => setActiveView('chat')} />
               ) : activeView === 'marketplace' ? (
                 <MarketplacePanel onClose={() => setActiveView('chat')} />
+              ) : activeView === 'notifications' ? (
+                <NotificationPanel onClose={() => setActiveView('chat')} />
               ) : (
                 <ThreadOrSubAgent
                   mode={threadMode}
