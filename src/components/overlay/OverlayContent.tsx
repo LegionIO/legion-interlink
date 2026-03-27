@@ -1,6 +1,7 @@
 import { useEffect, useState, type FC } from 'react';
-import { Monitor, Target, CheckCircle, Circle, Pause, AlertTriangle, Camera, MousePointerClick, Zap, Clock } from 'lucide-react';
+import { Monitor, Target, CheckCircle, Circle, Pause, AlertTriangle, Camera, MousePointerClick, Zap, Clock, ExternalLink } from 'lucide-react';
 import type { ComputerOverlayState } from '../../../shared/computer-use';
+import { legion } from '@/lib/ipc-client';
 
 function useNow(intervalMs: number): number {
   const [now, setNow] = useState(Date.now());
@@ -103,11 +104,18 @@ export const OverlayContent: FC<{ state: ComputerOverlayState }> = ({ state }) =
   const isPaused = state.status === 'paused';
   const isFailed = state.status === 'failed';
   const isRunning = state.status === 'running';
+  const [isHovered, setIsHovered] = useState(false);
   const now = useNow(1000);
   const elapsedMs = state.sessionStartedAt ? now - new Date(state.sessionStartedAt).getTime() : 0;
 
   const completedCheckpoints = state.checkpoints.filter((cp) => cp.complete).length;
   const totalCheckpoints = state.checkpoints.length;
+
+  const handleBannerClick = () => {
+    if (isPaused) {
+      legion.computerUse.focusSession(state.sessionId);
+    }
+  };
 
   return (
     <div className="relative h-full w-full">
@@ -118,13 +126,19 @@ export const OverlayContent: FC<{ state: ComputerOverlayState }> = ({ state }) =
             w-full max-w-4xl rounded-2xl px-6 py-4
             backdrop-blur-2xl
             border
+            transition-all duration-200
             ${isPaused
-              ? 'border-amber-400/80 bg-amber-950/80'
+              ? isHovered
+                ? 'border-amber-400 bg-amber-950/95 cursor-pointer shadow-lg shadow-amber-500/20'
+                : 'border-amber-400/80 bg-amber-950/80'
               : isFailed
                 ? 'border-red-400/80 bg-red-950/80'
                 : 'border-purple-400/80 bg-black/80 overlay-pulse-border'
             }
           `}
+          onMouseEnter={isPaused ? () => setIsHovered(true) : undefined}
+          onMouseLeave={isPaused ? () => setIsHovered(false) : undefined}
+          onClick={isPaused ? handleBannerClick : undefined}
         >
           {/* Top row: status icon, model, status badges, elapsed time */}
           <div className="flex items-center gap-3">
@@ -156,6 +170,14 @@ export const OverlayContent: FC<{ state: ComputerOverlayState }> = ({ state }) =
 
             {/* Right side: elapsed + step count */}
             <div className="flex flex-shrink-0 items-center gap-3">
+              {isPaused && isHovered && (
+                <div className="flex items-center gap-1.5 rounded-lg bg-amber-400/20 px-2.5 py-1.5">
+                  <ExternalLink className="h-3 w-3 text-amber-300" />
+                  <span className="text-[11px] font-medium text-amber-200">
+                    Click to return to Interlink
+                  </span>
+                </div>
+              )}
               {(state.actionCount ?? 0) > 0 && (
                 <div className="flex items-center gap-1.5 rounded-lg bg-white/5 px-2.5 py-1.5">
                   <MousePointerClick className="h-3 w-3 text-white/40" />

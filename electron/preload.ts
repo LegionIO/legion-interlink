@@ -253,6 +253,7 @@ const legionAPI = {
     getLocalMacosPermissions: () => ipcRenderer.invoke('computer-use:get-local-macos-permissions'),
     requestLocalMacosPermissions: () => ipcRenderer.invoke('computer-use:request-local-macos-permissions'),
     openLocalMacosPrivacySettings: (section?: ComputerUsePermissionSection) => ipcRenderer.invoke('computer-use:open-local-macos-privacy-settings', section),
+    focusSession: (sessionId: string) => ipcRenderer.invoke('computer-use:focus-session', sessionId),
     onEvent: (callback: (event: ComputerUseEvent) => void) => {
       const handler = (_event: Electron.IpcRendererEvent, data: ComputerUseEvent) => callback(data);
       ipcRenderer.on('computer-use:event', handler);
@@ -262,6 +263,11 @@ const legionAPI = {
       const handler = (_event: Electron.IpcRendererEvent, data: unknown) => callback(data);
       ipcRenderer.on('computer-use:overlay-state', handler);
       return () => ipcRenderer.removeListener('computer-use:overlay-state', handler);
+    },
+    onFocusThread: (callback: () => void) => {
+      const handler = () => callback();
+      ipcRenderer.on('computer-use:focus-thread', handler);
+      return () => ipcRenderer.removeListener('computer-use:focus-thread', handler);
     },
   },
 

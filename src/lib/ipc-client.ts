@@ -180,8 +180,10 @@ type LegionAPI = {
     getLocalMacosPermissions: () => Promise<ComputerUsePermissions>;
     requestLocalMacosPermissions: () => Promise<ComputerUsePermissionRequestResult>;
     openLocalMacosPrivacySettings: (section?: ComputerUsePermissionSection) => Promise<{ opened: ComputerUsePermissionSection | null }>;
+    focusSession: (sessionId: string) => Promise<unknown>;
     onEvent: (callback: (event: ComputerUseEvent) => void) => () => void;
     onOverlayState: (callback: (state: unknown) => void) => () => void;
+    onFocusThread: (callback: () => void) => () => void;
   };
   mic: {
     listDevices: () => Promise<Array<{ deviceId: string; label: string }>>;

@@ -199,6 +199,15 @@ export function updateOverlayState(sessionId: string, state: ComputerOverlayStat
       screenWidth: overlayScreenWidth,
       screenHeight: overlayScreenHeight,
     });
+
+    // When paused, make the overlay clickable so the user can click the
+    // banner to return to the main window. Otherwise, keep it click-through.
+    const isPaused = state.status === 'paused';
+    if (isPaused) {
+      win.setIgnoreMouseEvents(false);
+    } else {
+      win.setIgnoreMouseEvents(true, { forward: true });
+    }
   }
 }
 

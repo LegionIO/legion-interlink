@@ -8,11 +8,28 @@ import type {
 } from '../../shared/computer-use.js';
 import { getComputerUseManager } from '../computer-use/service.js';
 import type { LegionConfig } from '../config/schema.js';
+import { readConversationStore, writeConversationStore, broadcastConversationChange } from './conversations.js';
 
 function broadcast(event: ComputerUseEvent): void {
   for (const win of BrowserWindow.getAllWindows()) {
     win.webContents.send('computer-use:event', event);
   }
+}
+
+/**
+ * Find the primary application window (not overlay or operator windows).
+ * The main window is the only one that is resizable and focusable.
+ */
+function findMainWindow(): BrowserWindow | null {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win.isDestroyed()) continue;
+    // Overlays and operator windows are created with resizable: false and/or focusable: false.
+    // The main window is resizable and focusable.
+    if (win.isResizable() && win.isFocusable()) {
+      return win;
+    }
+  }
+  return null;
 }
 
 export function registerComputerUseHandlers(
@@ -43,4 +60,28 @@ export function registerComputerUseHandlers(
   ipcMain.handle('computer-use:get-local-macos-permissions', () => manager.getLocalMacosPermissions());
   ipcMain.handle('computer-use:request-local-macos-permissions', () => manager.requestLocalMacosPermissions());
   ipcMain.handle('computer-use:open-local-macos-privacy-settings', (_event, section?: ComputerUsePermissionSection) => manager.openLocalMacosPrivacySettings(section));
+
+  ipcMain.handle('computer-use:focus-session', (_event, sessionId: string) => {
+    const session = manager.getSession(sessionId);
+    if (!session) return { ok: false, error: 'Session not found' };
+
+    // Switch active conversation to the one owning this computer-use session
+    const store = readConversationStore(legionHome);
+    if (store.conversations[session.conversationId]) {
+      store.activeConversationId = session.conversationId;
+      writeConversationStore(legionHome, store);
+      broadcastConversationChange(store);
+    }
+
+    // Focus the main window and tell its renderer to switch to the computer tab
+    const mainWin = findMainWindow();
+    if (mainWin) {
+      if (mainWin.isMinimized()) mainWin.restore();
+      if (!mainWin.isVisible()) mainWin.show();
+      mainWin.focus();
+      mainWin.webContents.send('computer-use:focus-thread');
+    }
+
+    return { ok: true };
+  });
 }
