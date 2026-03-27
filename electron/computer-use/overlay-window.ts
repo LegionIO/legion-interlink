@@ -1,6 +1,26 @@
-import { BrowserWindow, screen } from 'electron';
+import { BrowserWindow, ipcMain, screen } from 'electron';
 import { join } from 'node:path';
 import type { ComputerDisplayLayout, ComputerOverlayState } from '../../shared/computer-use.js';
+
+// IPC handler for overlay mouse region toggling.
+// When the renderer detects the mouse entering the clickable banner area
+// (while paused), it sends this to temporarily make the window accept clicks.
+// When the mouse leaves, it switches back to click-through.
+let overlayMouseRegistered = false;
+function ensureOverlayMouseIpc(): void {
+  if (overlayMouseRegistered) return;
+  overlayMouseRegistered = true;
+
+  ipcMain.on('computer-use:overlay-set-ignore-mouse', (event, ignore: boolean) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || win.isDestroyed()) return;
+    if (ignore) {
+      win.setIgnoreMouseEvents(true, { forward: true });
+    } else {
+      win.setIgnoreMouseEvents(false);
+    }
+  });
+}
 
 /**
  * Storage: sessionId → Map<displayKey, BrowserWindow>
@@ -48,6 +68,7 @@ function createSingleOverlay(
   displayKey: string,
   bounds: { x: number; y: number; width: number; height: number },
 ): BrowserWindow {
+  ensureOverlayMouseIpc();
   const preloadPath = join(__dirname, '../preload/index.mjs');
   const win = new BrowserWindow({
     x: bounds.x,
@@ -79,6 +100,9 @@ function createSingleOverlay(
 
   // Place above all normal windows, menu bar, and dock
   win.setAlwaysOnTop(true, 'screen-saver');
+
+  // Make visible across all Spaces, including full-screen app Spaces
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
 
   // Force full-display bounds (bypass work area constraints)
   win.setBounds(bounds);
@@ -199,15 +223,6 @@ export function updateOverlayState(sessionId: string, state: ComputerOverlayStat
       screenWidth: overlayScreenWidth,
       screenHeight: overlayScreenHeight,
     });
-
-    // When paused, make the overlay clickable so the user can click the
-    // banner to return to the main window. Otherwise, keep it click-through.
-    const isPaused = state.status === 'paused';
-    if (isPaused) {
-      win.setIgnoreMouseEvents(false);
-    } else {
-      win.setIgnoreMouseEvents(true, { forward: true });
-    }
   }
 }
 

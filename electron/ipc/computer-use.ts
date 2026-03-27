@@ -1,5 +1,7 @@
 import type { IpcMain } from 'electron';
-import { BrowserWindow } from 'electron';
+import { BrowserWindow, app } from 'electron';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import type {
   StartComputerSessionOptions,
   ComputerUseEvent,
@@ -9,6 +11,72 @@ import type {
 import { getComputerUseManager } from '../computer-use/service.js';
 import type { LegionConfig } from '../config/schema.js';
 import { readConversationStore, writeConversationStore, broadcastConversationChange } from './conversations.js';
+
+const execFileAsync = promisify(execFile);
+
+/**
+ * Use AppleScript to detect which apps have full-screen windows.
+ * Returns an array of app names that are currently full-screened.
+ */
+async function detectFullScreenApps(): Promise<string[]> {
+  if (process.platform !== 'darwin') return [];
+  try {
+    const script = `
+tell application "System Events"
+  set fullScreenApps to {}
+  repeat with proc in (every application process whose visible is true)
+    try
+      repeat with w in (every window of proc)
+        try
+          if value of attribute "AXFullScreen" of w is true then
+            set end of fullScreenApps to name of proc
+          end if
+        end try
+      end repeat
+    end try
+  end repeat
+  return fullScreenApps
+end tell`;
+    const { stdout } = await execFileAsync('osascript', ['-e', script], { timeout: 10000 });
+    const trimmed = stdout.trim();
+    if (!trimmed) return [];
+    // AppleScript returns comma-separated list for multiple, or a single name
+    return trimmed.split(', ').map((s) => s.trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Use AppleScript to exit full-screen for specific apps.
+ */
+async function exitFullScreenApps(appNames: string[]): Promise<{ exited: string[]; failed: string[] }> {
+  if (process.platform !== 'darwin') return { exited: [], failed: [] };
+  const exited: string[] = [];
+  const failed: string[] = [];
+  for (const appName of appNames) {
+    try {
+      const script = `tell application "System Events" to tell application process "${appName}"
+  repeat with w in (every window)
+    try
+      if value of attribute "AXFullScreen" of w is true then
+        set value of attribute "AXFullScreen" of w to false
+      end if
+    end try
+  end repeat
+end tell`;
+      await execFileAsync('osascript', ['-e', script], { timeout: 5000 });
+      exited.push(appName);
+    } catch {
+      failed.push(appName);
+    }
+  }
+  // Wait for macOS full-screen exit animations
+  if (exited.length > 0) {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+  }
+  return { exited, failed };
+}
 
 function broadcast(event: ComputerUseEvent): void {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -60,6 +128,48 @@ export function registerComputerUseHandlers(
   ipcMain.handle('computer-use:get-local-macos-permissions', () => manager.getLocalMacosPermissions());
   ipcMain.handle('computer-use:request-local-macos-permissions', () => manager.requestLocalMacosPermissions());
   ipcMain.handle('computer-use:open-local-macos-privacy-settings', (_event, section?: ComputerUsePermissionSection) => manager.openLocalMacosPrivacySettings(section));
+
+  ipcMain.handle('computer-use:check-fullscreen-apps', async () => {
+    const allFullScreen = await detectFullScreenApps();
+    const config = getConfig();
+
+    // Apps in the capture exclusion list will produce blank screenshots if full-screened
+    const excludedNames = (config.computerUse?.localMacos?.captureExcludedApps ?? [])
+      .map((n: string) => n.toLowerCase());
+
+    // Our own app is always excluded by PID, so it's always problematic when full-screened.
+    // Use app.getName() so this works regardless of app name.
+    const ownName = app.getName().toLowerCase();
+
+    const problematicApps = allFullScreen.filter((fsApp) => {
+      const lower = fsApp.toLowerCase();
+      // Flag our own app (excluded by PID in screenshots)
+      if (lower === ownName || lower.includes(ownName) || ownName.includes(lower)) return true;
+      // Flag apps matching the capture exclusion list
+      return excludedNames.some((ex) => lower.includes(ex) || ex.includes(lower));
+    });
+
+    return { apps: allFullScreen, problematicApps };
+  });
+
+  ipcMain.handle('computer-use:exit-fullscreen-apps', async (_event, appNames: string[]) => {
+    return exitFullScreenApps(appNames);
+  });
+
+  ipcMain.handle('computer-use:list-running-apps', async () => {
+    if (process.platform !== 'darwin') return { apps: [] };
+    try {
+      const script = `tell application "System Events" to get name of every application process whose background only is false`;
+      const { stdout } = await execFileAsync('osascript', ['-e', script], { timeout: 10000 });
+      const trimmed = stdout.trim();
+      if (!trimmed) return { apps: [] };
+      const apps = trimmed.split(', ').map((s) => s.trim()).filter(Boolean);
+      // Sort alphabetically and deduplicate
+      return { apps: [...new Set(apps)].sort((a, b) => a.localeCompare(b)) };
+    } catch {
+      return { apps: [] };
+    }
+  });
 
   ipcMain.handle('computer-use:focus-session', (_event, sessionId: string) => {
     const session = manager.getSession(sessionId);

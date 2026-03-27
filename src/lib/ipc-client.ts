@@ -180,7 +180,12 @@ type LegionAPI = {
     getLocalMacosPermissions: () => Promise<ComputerUsePermissions>;
     requestLocalMacosPermissions: () => Promise<ComputerUsePermissionRequestResult>;
     openLocalMacosPrivacySettings: (section?: ComputerUsePermissionSection) => Promise<{ opened: ComputerUsePermissionSection | null }>;
+    checkFullScreenApps: () => Promise<{ apps: string[]; problematicApps: string[] }>;
+    exitFullScreenApps: (appNames: string[]) => Promise<{ exited: string[]; failed: string[] }>;
+    listRunningApps: () => Promise<{ apps: string[] }>;
     focusSession: (sessionId: string) => Promise<unknown>;
+    overlayMouseEnter: () => void;
+    overlayMouseLeave: () => void;
     onEvent: (callback: (event: ComputerUseEvent) => void) => () => void;
     onOverlayState: (callback: (state: unknown) => void) => () => void;
     onFocusThread: (callback: () => void) => () => void;
