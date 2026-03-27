@@ -19,5 +19,5 @@ mac:
     - target: dmg
       arch:
         - arm64
-  artifactName: "${productName}-${version}-arm64.${ext}"
+  artifactName: "Legion-Interlink-${version}-arm64.${ext}"
   identity: null
