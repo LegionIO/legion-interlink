@@ -16,8 +16,8 @@ mac:
     NSMicrophoneUsageDescription: "Legion Interlink uses the microphone for voice dictation (speech-to-text)."
     NSAppleEventsUsageDescription: "Legion Interlink uses Apple Events to activate apps and inspect focused windows during Local Mac computer control."
   target:
-    - target: dir
+    - target: dmg
       arch:
         - arm64
-        - x64
+  artifactName: "${productName}-${version}-arm64.${ext}"
   identity: null
