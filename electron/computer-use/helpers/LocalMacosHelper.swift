@@ -121,12 +121,13 @@ func parseIntArg(_ args: [String], _ index: Int, default value: Int) -> Int {
 }
 
 enum PointerMovementPath: String {
+  case teleport = "teleport"
   case direct = "direct"
   case horizontalFirst = "horizontal-first"
   case verticalFirst = "vertical-first"
 }
 
-func parseMovementPathArg(_ args: [String], _ index: Int, default value: PointerMovementPath = .direct) -> PointerMovementPath {
+func parseMovementPathArg(_ args: [String], _ index: Int, default value: PointerMovementPath = .teleport) -> PointerMovementPath {
   guard args.count > index else {
     return value
   }
@@ -150,6 +151,10 @@ func postMouse(_ type: CGEventType, x: Double, y: Double, button: CGMouseButton 
   event.post(tap: .cghidEventTap)
 }
 
+func warpPointer(to point: CGPoint) {
+  CGWarpMouseCursorPosition(convertTopLeftToQuartz(point.x, point.y))
+}
+
 func animatePointerSegment(from start: CGPoint, to end: CGPoint, durationMs: Int, steps: Int, dragMode: Bool = false) {
   let effectiveSteps = max(1, steps)
   let totalDuration = max(0, durationMs)
@@ -163,7 +168,16 @@ func animatePointerSegment(from start: CGPoint, to end: CGPoint, durationMs: Int
   }
 }
 
-func animatePointerMove(from start: CGPoint, to end: CGPoint, durationMs: Int, steps: Int, path: PointerMovementPath = .direct, dragMode: Bool = false) {
+func animatePointerMove(from start: CGPoint, to end: CGPoint, durationMs: Int, steps: Int, path: PointerMovementPath = .teleport, dragMode: Bool = false) {
+  if path == .teleport {
+    if dragMode {
+      postMouse(.leftMouseDragged, x: end.x, y: end.y)
+      return
+    }
+    warpPointer(to: end)
+    return
+  }
+
   let dx = end.x - start.x
   let dy = end.y - start.y
   let absX = abs(dx)
@@ -191,8 +205,12 @@ func animatePointerMove(from start: CGPoint, to end: CGPoint, durationMs: Int, s
   animatePointerSegment(from: corner, to: end, durationMs: secondDuration, steps: secondSteps, dragMode: dragMode)
 }
 
-func dragPointer(from start: CGPoint, to end: CGPoint, durationMs: Int, steps: Int, path: PointerMovementPath = .direct) {
-  postMouse(.mouseMoved, x: start.x, y: start.y)
+func dragPointer(from start: CGPoint, to end: CGPoint, durationMs: Int, steps: Int, path: PointerMovementPath = .teleport) {
+  if path == .teleport {
+    warpPointer(to: start)
+  } else {
+    postMouse(.mouseMoved, x: start.x, y: start.y)
+  }
   postMouse(.leftMouseDown, x: start.x, y: start.y)
   animatePointerMove(from: start, to: end, durationMs: durationMs, steps: steps, path: path, dragMode: true)
   postMouse(.leftMouseUp, x: end.x, y: end.y)

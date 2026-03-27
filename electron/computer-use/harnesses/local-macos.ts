@@ -162,7 +162,7 @@ function buildResult(summary: string, cursor?: { x: number; y: number }): Comput
   };
 }
 
-function resolveMovementPath(action: ComputerActionProposal): 'direct' | 'horizontal-first' | 'vertical-first' {
+function resolveMovementPath(action: ComputerActionProposal): 'teleport' | 'direct' | 'horizontal-first' | 'vertical-first' {
   return action.movementPath;
 }
 
@@ -175,7 +175,7 @@ async function resolveActualCursor(fallback: { x: number; y: number }): Promise<
   };
 }
 
-function summarizePointerAction(prefix: string, requested: { x: number; y: number }, actual: { x: number; y: number }, movementPath: 'direct' | 'horizontal-first' | 'vertical-first'): string {
+function summarizePointerAction(prefix: string, requested: { x: number; y: number }, actual: { x: number; y: number }, movementPath: 'teleport' | 'direct' | 'horizontal-first' | 'vertical-first'): string {
   const pathSuffix = movementPath === 'direct' ? '' : ' via ' + movementPath;
   if (requested.x === actual.x && requested.y === actual.y) {
     return prefix + ' ' + requested.x + ', ' + requested.y + pathSuffix + '.';

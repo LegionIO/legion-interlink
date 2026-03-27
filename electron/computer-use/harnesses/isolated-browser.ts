@@ -249,7 +249,9 @@ function buildPointerRoute(start: BrowserPoint, end: BrowserPoint, path: Compute
     }
   };
 
-  push(start);
+  if (path !== 'teleport') {
+    push(start);
+  }
   if (path === 'horizontal-first') {
     push({ x: end.x, y: start.y });
   } else if (path === 'vertical-first') {

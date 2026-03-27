@@ -28,7 +28,7 @@ export type ComputerUseActionKind =
 
 export type ComputerUseActionRisk = 'low' | 'medium' | 'high';
 
-export type ComputerUseMovementPath = 'direct' | 'horizontal-first' | 'vertical-first';
+export type ComputerUseMovementPath = 'teleport' | 'direct' | 'horizontal-first' | 'vertical-first';
 
 export type ComputerUseActionStatus =
   | 'proposed'

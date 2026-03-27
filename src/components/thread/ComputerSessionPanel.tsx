@@ -35,7 +35,9 @@ function isPointerAction(action: Pick<ComputerActionProposal, 'kind'>): boolean 
 }
 
 function formatMovementPath(path: ComputerActionProposal['movementPath']): string {
-  return path === 'horizontal-first'
+  return path === 'teleport'
+    ? 'teleport'
+    : path === 'horizontal-first'
     ? 'horizontal first'
     : path === 'vertical-first'
       ? 'vertical first'

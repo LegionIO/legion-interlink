@@ -61,7 +61,7 @@ function normalizeHydratedSession(session: ComputerSession): ComputerSession {
     ...session,
     actions: session.actions.map((action) => ({
       ...action,
-      movementPath: action.movementPath ?? 'direct',
+      movementPath: action.movementPath ?? 'teleport',
     })),
   };
 }
