@@ -16,6 +16,7 @@ import { GitHubPanel } from '@/components/github/GitHubPanel';
 import { MarketplacePanel } from '@/components/marketplace/MarketplacePanel';
 import { CommandBar } from '@/components/CommandBar';
 import { NotificationPanel } from '@/components/notifications/NotificationPanel';
+import { DashboardPanel } from '@/components/dashboard/DashboardPanel';
 import { ToastContainer } from '@/components/notifications/ToastContainer';
 import { NotificationProvider, useNotifications } from '@/providers/NotificationProvider';
 import { PluginProvider } from '@/providers/PluginProvider';
@@ -23,7 +24,7 @@ import { PluginBannerSlot } from '@/components/plugins/PluginBannerSlot';
 import { PluginModalHost } from '@/components/plugins/PluginModalHost';
 import { ComputerUseProvider, useComputerUse } from '@/providers/ComputerUseProvider';
 import { OverlayShell } from '@/components/overlay/OverlayShell';
-import { BellIcon, BookOpenIcon, CpuIcon, GitBranchIcon, PuzzleIcon, SettingsIcon } from 'lucide-react';
+import { BellIcon, BookOpenIcon, CpuIcon, GaugeIcon, GitBranchIcon, PuzzleIcon, SettingsIcon } from 'lucide-react';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import type { ReasoningEffort } from '@/components/thread/ReasoningEffortSelector';
 import { legion } from '@/lib/ipc-client';
@@ -340,7 +341,7 @@ async function cleanupEmptyConversations(
   }
 }
 
-type AppView = 'chat' | 'settings' | 'knowledge' | 'github' | 'marketplace' | 'notifications';
+type AppView = 'chat' | 'dashboard' | 'settings' | 'knowledge' | 'github' | 'marketplace' | 'notifications';
 
 function AppShell() {
   const { unreadCount } = useNotifications();
@@ -665,6 +666,14 @@ function AppShell() {
                 </button>
                 <button
                   type="button"
+                  onClick={() => setActiveView(activeView === 'dashboard' ? 'chat' : 'dashboard')}
+                  className={`rounded-md p-1.5 transition-colors hover:bg-sidebar-accent/80 ${activeView === 'dashboard' ? 'bg-primary/15 text-primary' : 'text-muted-foreground'}`}
+                  title="Dashboard"
+                >
+                  <GaugeIcon className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
                   onClick={() => setActiveView(activeView === 'knowledge' ? 'chat' : 'knowledge')}
                   className={`rounded-md p-1.5 transition-colors hover:bg-sidebar-accent/80 ${activeView === 'knowledge' ? 'bg-primary/15 text-primary' : 'text-muted-foreground'}`}
                   title="Knowledge"
@@ -734,6 +743,8 @@ function AppShell() {
                   <span className="text-sm font-medium text-foreground">Extensions</span>
                 ) : activeView === 'notifications' ? (
                   <span className="text-sm font-medium text-foreground">Notifications</span>
+                ) : activeView === 'dashboard' ? (
+                  <span className="text-sm font-medium text-foreground">Dashboard</span>
                 ) : (
                   <span className="block truncate text-sm font-medium text-foreground">
                     {activeConversationTitle}
@@ -753,6 +764,8 @@ function AppShell() {
                 <MarketplacePanel onClose={() => setActiveView('chat')} />
               ) : activeView === 'notifications' ? (
                 <NotificationPanel onClose={() => setActiveView('chat')} />
+              ) : activeView === 'dashboard' ? (
+                <DashboardPanel onClose={() => setActiveView('chat')} />
               ) : (
                 <ThreadOrSubAgent
                   mode={threadMode}
