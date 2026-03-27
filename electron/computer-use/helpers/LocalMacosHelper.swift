@@ -653,6 +653,12 @@ case "screenshot":
         let excludeSet = Set(excludeAppNames.map { $0.lowercased() })
         let excludedWindows = content.windows.filter { window in
           guard let app = window.owningApplication else { return false }
+          // Only exclude normal-level windows (layer 0). Menu bar items,
+          // status bar icons, and other system-level UI live at higher
+          // window layers (e.g. 24 for the main menu bar, 25 for status
+          // items). Excluding those causes ScreenCaptureKit to hide the
+          // entire menu bar area, which the AI needs to see and interact with.
+          if window.windowLayer != 0 { return false }
           // Exclude by PID (our own process and its windows)
           if let pid = excludePid, app.processID == pid {
             return true
