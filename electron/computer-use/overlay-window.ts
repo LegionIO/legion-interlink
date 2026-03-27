@@ -11,11 +11,19 @@ function ensureDockVisible(): void {
   try {
     const dock = process.platform === 'darwin' ? app.dock : undefined;
     if (!dock) return;
+
+    const icon = existsSync(APP_ICON) ? nativeImage.createFromPath(APP_ICON) : null;
+
+    // Set icon before show() in case show() reads the current icon
+    if (icon) dock.setIcon(icon);
+
     void dock.show().then(() => {
-      // dock.show() resets to the default Electron icon — re-apply our custom icon
-      if (existsSync(APP_ICON)) {
-        dock.setIcon(nativeImage.createFromPath(APP_ICON));
-      }
+      // dock.show() can reset the icon — re-apply after a short delay
+      // to ensure it sticks after the macOS dock animation completes
+      if (icon) dock.setIcon(icon);
+      setTimeout(() => {
+        if (icon) dock.setIcon(icon);
+      }, 200);
     });
   } catch {
     // Dock API may not be available in all environments
