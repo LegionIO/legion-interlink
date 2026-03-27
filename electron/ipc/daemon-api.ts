@@ -479,6 +479,19 @@ export function registerDaemonApiHandlers(
   ipcMain.handle('daemon:mesh-peers', async () =>
     daemonGet(cfg(), legionHome, '/api/mesh/peers'));
 
+  // ── Absorbers ──
+  ipcMain.handle('daemon:absorbers', async () =>
+    daemonGet(cfg(), legionHome, '/api/absorbers'));
+
+  ipcMain.handle('daemon:absorber-resolve', async (_e, input: string) =>
+    daemonPost(cfg(), legionHome, '/api/absorbers/resolve', { input }));
+
+  ipcMain.handle('daemon:absorber-dispatch', async (_e, input: string, scope?: string) =>
+    daemonPost(cfg(), legionHome, '/api/absorbers/dispatch', { input, scope }));
+
+  ipcMain.handle('daemon:absorber-job', async (_e, jobId: string) =>
+    daemonGet(cfg(), legionHome, `/api/absorbers/jobs/${jobId}`));
+
   // ── Health / Doctor / Metrics ──
   ipcMain.handle('daemon:health', async () =>
     daemonGet(cfg(), legionHome, '/api/health'));

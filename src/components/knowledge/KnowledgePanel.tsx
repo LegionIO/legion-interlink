@@ -1,19 +1,21 @@
 import { useState, useEffect, useCallback } from 'react';
-import { BookOpenIcon, SearchIcon, TableIcon, UploadIcon, FolderSyncIcon, HeartPulseIcon, XIcon, RefreshCwIcon, AlertCircleIcon, Loader2Icon } from 'lucide-react';
+import { BookOpenIcon, SearchIcon, TableIcon, UploadIcon, FolderSyncIcon, HeartPulseIcon, MagnetIcon, XIcon, RefreshCwIcon, AlertCircleIcon, Loader2Icon } from 'lucide-react';
 import { legion } from '@/lib/ipc-client';
 import { QueryTab } from './QueryTab';
 import { BrowseTab } from './BrowseTab';
 import { IngestTab } from './IngestTab';
 import { MonitorsTab } from './MonitorsTab';
 import { HealthTab } from './HealthTab';
+import { AbsorbTab } from './AbsorbTab';
 import { KnowledgeDropZone } from './KnowledgeDropZone';
 
-type KnowledgeTab = 'query' | 'browse' | 'ingest' | 'monitors' | 'health';
+type KnowledgeTab = 'query' | 'browse' | 'ingest' | 'absorb' | 'monitors' | 'health';
 
 const tabs: { key: KnowledgeTab; label: string; icon: typeof SearchIcon }[] = [
   { key: 'query', label: 'Query', icon: SearchIcon },
   { key: 'browse', label: 'Browse', icon: TableIcon },
   { key: 'ingest', label: 'Ingest', icon: UploadIcon },
+  { key: 'absorb', label: 'Absorb', icon: MagnetIcon },
   { key: 'monitors', label: 'Monitors', icon: FolderSyncIcon },
   { key: 'health', label: 'Health', icon: HeartPulseIcon },
 ];
@@ -106,6 +108,7 @@ export function KnowledgePanel({ onClose }: Props) {
             {activeTab === 'query' && <QueryTab />}
             {activeTab === 'browse' && <BrowseTab />}
             {activeTab === 'ingest' && <IngestTab />}
+            {activeTab === 'absorb' && <AbsorbTab />}
             {activeTab === 'monitors' && <MonitorsTab />}
             {activeTab === 'health' && <HealthTab />}
           </>
