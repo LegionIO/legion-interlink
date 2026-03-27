@@ -15,6 +15,8 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
 
       - uses: actions/setup-node@v4
         with:
@@ -31,7 +33,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
-        run: gh release upload "$TAG" dist/*.dmg --clobber
+        run: |
+          gh release view "$TAG" --repo LegionIO/legion-interlink > /dev/null 2>&1 || \
+            gh release create "$TAG" --repo LegionIO/legion-interlink --title "$TAG" --generate-notes
+          gh release upload "$TAG" dist/*.dmg --clobber
 
   update-cask:
     needs: build
@@ -50,8 +55,12 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
           TAG: ${{ github.ref_name }}
         run: |
-          url="https://github.com/LegionIO/legion-interlink/releases/download/${TAG}/Legion-Interlink-${VERSION}-arm64.dmg"
-          curl -fsSL -o interlink.dmg "$url"
+          asset_url=$(gh release view "$TAG" --repo LegionIO/legion-interlink --json assets --jq '.assets[] | select(.name | endswith(".dmg")) | .url' | head -n 1)
+          if [ -z "$asset_url" ]; then
+            echo "No DMG asset found for release $TAG" >&2
+            exit 1
+          fi
+          gh api "$asset_url" --output interlink.dmg
           sha=$(shasum -a 256 interlink.dmg | awk '{print $1}')
           echo "sha256=$sha" >> "$GITHUB_OUTPUT"
 
@@ -92,5 +101,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Casks/legion-interlink.rb
-          git commit -m "update legion-interlink cask to ${VERSION}"
-          git push
+          if git diff --cached --quiet; then
+            echo "No changes to commit; skipping commit and push."
+          else
+            git commit -m "update legion-interlink cask to ${VERSION}"
+            git push
+          fi
