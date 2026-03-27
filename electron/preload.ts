@@ -257,6 +257,7 @@ const legionAPI = {
     checkFullScreenApps: () => ipcRenderer.invoke('computer-use:check-fullscreen-apps') as Promise<{ apps: string[]; problematicApps: string[] }>,
     exitFullScreenApps: (appNames: string[]) => ipcRenderer.invoke('computer-use:exit-fullscreen-apps', appNames) as Promise<{ exited: string[]; failed: string[] }>,
     listRunningApps: () => ipcRenderer.invoke('computer-use:list-running-apps') as Promise<{ apps: string[] }>,
+    listDisplays: () => ipcRenderer.invoke('computer-use:list-displays') as Promise<{ displays: Array<{ name: string; displayId: string; pixelWidth: number; pixelHeight: number; isPrimary: boolean }> }>,
     focusSession: (sessionId: string) => ipcRenderer.invoke('computer-use:focus-session', sessionId),
     overlayMouseEnter: () => ipcRenderer.send('computer-use:overlay-set-ignore-mouse', false),
     overlayMouseLeave: () => ipcRenderer.send('computer-use:overlay-set-ignore-mouse', true),

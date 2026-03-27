@@ -9,6 +9,7 @@ import type {
   ComputerUseSurface,
 } from '../../shared/computer-use.js';
 import { getComputerUseManager } from '../computer-use/service.js';
+import { getLocalMacDisplayLayout } from '../computer-use/permissions.js';
 import type { LegionConfig } from '../config/schema.js';
 import { readConversationStore, writeConversationStore, broadcastConversationChange } from './conversations.js';
 
@@ -169,6 +170,25 @@ export function registerComputerUseHandlers(
       return { apps: [...new Set(apps)].sort((a, b) => a.localeCompare(b)) };
     } catch {
       return { apps: [] };
+    }
+  });
+
+  ipcMain.handle('computer-use:list-displays', async () => {
+    if (process.platform !== 'darwin') return { displays: [] };
+    try {
+      const layout = await getLocalMacDisplayLayout();
+      if (!layout || layout.displays.length === 0) return { displays: [] };
+      return {
+        displays: layout.displays.map((d) => ({
+          name: d.name,
+          displayId: d.displayId,
+          pixelWidth: d.pixelWidth,
+          pixelHeight: d.pixelHeight,
+          isPrimary: d.isPrimary,
+        })),
+      };
+    } catch {
+      return { displays: [] };
     }
   });
 

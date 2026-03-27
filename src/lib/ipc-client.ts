@@ -184,6 +184,7 @@ type LegionAPI = {
     checkFullScreenApps: () => Promise<{ apps: string[]; problematicApps: string[] }>;
     exitFullScreenApps: (appNames: string[]) => Promise<{ exited: string[]; failed: string[] }>;
     listRunningApps: () => Promise<{ apps: string[] }>;
+    listDisplays: () => Promise<{ displays: Array<{ name: string; displayId: string; pixelWidth: number; pixelHeight: number; isPrimary: boolean }> }>;
     focusSession: (sessionId: string) => Promise<unknown>;
     overlayMouseEnter: () => void;
     overlayMouseLeave: () => void;
