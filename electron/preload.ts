@@ -253,7 +253,12 @@ const legionAPI = {
     getLocalMacosPermissions: () => ipcRenderer.invoke('computer-use:get-local-macos-permissions'),
     requestLocalMacosPermissions: () => ipcRenderer.invoke('computer-use:request-local-macos-permissions'),
     openLocalMacosPrivacySettings: (section?: ComputerUsePermissionSection) => ipcRenderer.invoke('computer-use:open-local-macos-privacy-settings', section),
+    checkFullScreenApps: () => ipcRenderer.invoke('computer-use:check-fullscreen-apps') as Promise<{ apps: string[]; problematicApps: string[] }>,
+    exitFullScreenApps: (appNames: string[]) => ipcRenderer.invoke('computer-use:exit-fullscreen-apps', appNames) as Promise<{ exited: string[]; failed: string[] }>,
+    listRunningApps: () => ipcRenderer.invoke('computer-use:list-running-apps') as Promise<{ apps: string[] }>,
     focusSession: (sessionId: string) => ipcRenderer.invoke('computer-use:focus-session', sessionId),
+    overlayMouseEnter: () => ipcRenderer.send('computer-use:overlay-set-ignore-mouse', false),
+    overlayMouseLeave: () => ipcRenderer.send('computer-use:overlay-set-ignore-mouse', true),
     onEvent: (callback: (event: ComputerUseEvent) => void) => {
       const handler = (_event: Electron.IpcRendererEvent, data: ComputerUseEvent) => callback(data);
       ipcRenderer.on('computer-use:event', handler);

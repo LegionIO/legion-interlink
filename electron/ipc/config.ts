@@ -168,6 +168,7 @@ function getDefaultConfig() {
       defaultTarget: 'isolated-browser' as const,
       approvalModeDefault: 'step' as const,
       idleTimeoutSec: 180,
+      postActionDelayMs: 300,
       maxSessionDurationMin: 45,
       models: {},
       capture: {
@@ -192,7 +193,7 @@ function getDefaultConfig() {
         deniedApps: [],
         allowedDisplays: [],
         redactApps: [],
-        captureExcludedApps: ['Electron', 'Interlink'],
+        captureExcludedApps: ['Electron'],
       },
       isolated: {
         browserProfileDir: '~/.legionio/browser-profile',

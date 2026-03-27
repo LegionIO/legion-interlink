@@ -204,6 +204,7 @@ const computerUseConfigSchema = z.object({
   defaultTarget: computerUseTargetSchema,
   approvalModeDefault: computerUseApprovalModeSchema,
   idleTimeoutSec: z.number().positive(),
+  postActionDelayMs: z.number().min(0).max(5000),
   maxSessionDurationMin: z.number().positive(),
   models: z.object({
     plannerModelKey: z.string().optional(),

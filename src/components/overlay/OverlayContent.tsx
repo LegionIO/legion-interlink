@@ -117,6 +117,21 @@ export const OverlayContent: FC<{ state: ComputerOverlayState }> = ({ state }) =
     }
   };
 
+  const handleBannerMouseEnter = () => {
+    if (!isPaused) return;
+    setIsHovered(true);
+    // Tell the main process to make this overlay window accept clicks
+    // so the user can click the banner. Only the banner area triggers this.
+    legion.computerUse.overlayMouseEnter();
+  };
+
+  const handleBannerMouseLeave = () => {
+    if (!isPaused) return;
+    setIsHovered(false);
+    // Restore click-through so clicks pass to the desktop beneath
+    legion.computerUse.overlayMouseLeave();
+  };
+
   return (
     <div className="relative h-full w-full">
       {/* Expanded status banner at top */}
@@ -136,8 +151,8 @@ export const OverlayContent: FC<{ state: ComputerOverlayState }> = ({ state }) =
                 : 'border-purple-400/80 bg-black/80 overlay-pulse-border'
             }
           `}
-          onMouseEnter={isPaused ? () => setIsHovered(true) : undefined}
-          onMouseLeave={isPaused ? () => setIsHovered(false) : undefined}
+          onMouseEnter={isPaused ? handleBannerMouseEnter : undefined}
+          onMouseLeave={isPaused ? handleBannerMouseLeave : undefined}
           onClick={isPaused ? handleBannerClick : undefined}
         >
           {/* Top row: status icon, model, status badges, elapsed time */}

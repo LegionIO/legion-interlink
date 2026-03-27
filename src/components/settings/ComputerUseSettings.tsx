@@ -1,6 +1,7 @@
-import { useState, type FC } from 'react';
-import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef, type FC } from 'react';
+import { ChevronDownIcon, ChevronRightIcon, XIcon } from 'lucide-react';
 import { NumberField, TextField, Toggle, settingsSelectClass, type SettingsProps } from './shared';
+import { legion } from '@/lib/ipc-client';
 
 type ComputerUseConfig = {
   enabled: boolean;
@@ -10,6 +11,7 @@ type ComputerUseConfig = {
   defaultTarget: 'isolated-browser' | 'local-macos';
   approvalModeDefault: 'step' | 'goal' | 'autonomous';
   idleTimeoutSec: number;
+  postActionDelayMs: number;
   maxSessionDurationMin: number;
   models: {
     plannerModelKey?: string;
@@ -77,6 +79,181 @@ function splitList(value: string): string[] {
   return value.split(',').map((part) => part.trim()).filter(Boolean);
 }
 
+/**
+ * A combobox-style picker for app names — shows current selections as removable
+ * chips, and a single input that filters discovered running apps while also
+ * offering an "Add custom" option for free-text entry.
+ */
+const AppListPicker: FC<{
+  label: string;
+  hint?: string;
+  value: string[];
+  onChange: (value: string[]) => void;
+}> = ({ label, hint, value, onChange }) => {
+  const [runningApps, setRunningApps] = useState<string[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [query, setQuery] = useState('');
+  const [isFocused, setIsFocused] = useState(false);
+  const [highlightIndex, setHighlightIndex] = useState(-1);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const refreshApps = useCallback(() => {
+    setIsLoading(true);
+    void legion.computerUse.listRunningApps().then(({ apps }) => {
+      setRunningApps(apps);
+    }).catch(() => {}).finally(() => setIsLoading(false));
+  }, []);
+
+  useEffect(() => { refreshApps(); }, [refreshApps]);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    if (!isFocused) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        inputRef.current && !inputRef.current.contains(e.target as Node) &&
+        dropdownRef.current && !dropdownRef.current.contains(e.target as Node)
+      ) {
+        setIsFocused(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isFocused]);
+
+  const addApp = (appName: string) => {
+    const trimmed = appName.trim();
+    if (trimmed && !value.includes(trimmed)) {
+      onChange([...value, trimmed]);
+    }
+    setQuery('');
+    setHighlightIndex(-1);
+  };
+
+  const removeApp = (appName: string) => {
+    onChange(value.filter((v) => v !== appName));
+  };
+
+  // Build the filtered options list
+  const availableApps = runningApps.filter((app) => !value.includes(app));
+  const lowerQuery = query.toLowerCase().trim();
+  const filteredApps = lowerQuery
+    ? availableApps.filter((app) => app.toLowerCase().includes(lowerQuery))
+    : availableApps;
+
+  // Show "Add custom" option when the query doesn't exactly match a known app
+  const exactMatchExists = lowerQuery && filteredApps.some((app) => app.toLowerCase() === lowerQuery);
+  const alreadyAdded = lowerQuery && value.some((v) => v.toLowerCase() === lowerQuery);
+  const showCustomOption = lowerQuery && !exactMatchExists && !alreadyAdded;
+
+  // Total items in dropdown for keyboard nav
+  const totalItems = filteredApps.length + (showCustomOption ? 1 : 0);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setHighlightIndex((prev) => Math.min(prev + 1, totalItems - 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlightIndex((prev) => Math.max(prev - 1, 0));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (highlightIndex >= 0 && highlightIndex < filteredApps.length) {
+        addApp(filteredApps[highlightIndex]);
+      } else if (showCustomOption && (highlightIndex === filteredApps.length || highlightIndex === -1)) {
+        addApp(query.trim());
+      } else if (query.trim()) {
+        addApp(query.trim());
+      }
+    } else if (e.key === 'Escape') {
+      setIsFocused(false);
+    }
+  };
+
+  const showDropdown = isFocused && (totalItems > 0 || isLoading);
+
+  return (
+    <div className="space-y-1.5">
+      <label className="text-[11px] font-medium text-muted-foreground">{label}</label>
+
+      {/* Current selections as removable chips */}
+      {value.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {value.map((app) => (
+            <span
+              key={app}
+              className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-card/60 px-2 py-0.5 text-[11px]"
+            >
+              {app}
+              <button
+                type="button"
+                onClick={() => removeApp(app)}
+                className="text-muted-foreground/60 hover:text-foreground transition-colors"
+              >
+                <XIcon className="h-3 w-3" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Unified combobox input */}
+      <div className="relative">
+        <input
+          ref={inputRef}
+          type="text"
+          value={query}
+          onChange={(e) => { setQuery(e.target.value); setHighlightIndex(-1); }}
+          onFocus={() => { setIsFocused(true); refreshApps(); }}
+          onKeyDown={handleKeyDown}
+          placeholder={isLoading ? 'Loading apps...' : 'Search running apps or type a name...'}
+          className="w-full rounded-md border border-border/60 bg-card/60 px-2 py-1.5 text-[11px] outline-none placeholder:text-muted-foreground/40 focus:border-primary/50"
+        />
+
+        {showDropdown && (
+          <div
+            ref={dropdownRef}
+            className="absolute z-50 mt-1 max-h-48 w-full overflow-y-auto rounded-md border border-border/60 bg-popover shadow-lg"
+          >
+            {filteredApps.map((app, i) => (
+              <button
+                key={app}
+                type="button"
+                onClick={() => addApp(app)}
+                className={`w-full px-2 py-1 text-left text-[11px] transition-colors ${
+                  i === highlightIndex ? 'bg-muted/60' : 'hover:bg-muted/40'
+                }`}
+              >
+                {app}
+              </button>
+            ))}
+            {showCustomOption && (
+              <button
+                type="button"
+                onClick={() => addApp(query.trim())}
+                className={`w-full px-2 py-1 text-left text-[11px] transition-colors ${
+                  highlightIndex === filteredApps.length ? 'bg-muted/60' : 'hover:bg-muted/40'
+                }`}
+              >
+                <span className="text-muted-foreground/60">Add custom: </span>
+                <span className="font-medium">{query.trim()}</span>
+              </button>
+            )}
+            {isLoading && filteredApps.length === 0 && (
+              <div className="px-2 py-1.5 text-[11px] text-muted-foreground/60">
+                Discovering running apps...
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {hint && <p className="text-[10px] text-muted-foreground/60">{hint}</p>}
+    </div>
+  );
+};
+
 const CollapsibleSection: FC<{ title: string; defaultOpen?: boolean; children: React.ReactNode }> = ({ title, defaultOpen = false, children }) => {
   const [open, setOpen] = useState(defaultOpen);
   return (
@@ -137,6 +314,7 @@ export const ComputerUseSettings: FC<SettingsProps> = ({ config, updateConfig })
             </select>
           </div>
           <NumberField label="Idle Timeout (sec)" value={computerUse.idleTimeoutSec} onChange={(value) => updateConfig('computerUse.idleTimeoutSec', value)} min={30} />
+          <NumberField label="Post-Action Delay (ms)" value={computerUse.postActionDelayMs} onChange={(value) => updateConfig('computerUse.postActionDelayMs', value)} min={0} max={5000} />
           <NumberField label="Max Session Duration (min)" value={computerUse.maxSessionDurationMin} onChange={(value) => updateConfig('computerUse.maxSessionDurationMin', value)} min={5} />
         </div>
       </fieldset>
@@ -189,7 +367,7 @@ export const ComputerUseSettings: FC<SettingsProps> = ({ config, updateConfig })
         <TextField label="Denied Apps" value={joinList(computerUse.localMacos.deniedApps)} onChange={(value) => updateConfig('computerUse.localMacos.deniedApps', splitList(value))} hint="Comma-separated app names" />
         <TextField label="Allowed Displays" value={joinList(computerUse.localMacos.allowedDisplays)} onChange={(value) => updateConfig('computerUse.localMacos.allowedDisplays', splitList(value))} hint="Comma-separated display identifiers" />
         <TextField label="Redact Apps" value={joinList(computerUse.localMacos.redactApps)} onChange={(value) => updateConfig('computerUse.localMacos.redactApps', splitList(value))} hint="Hide sensitive app windows from screenshots" />
-        <TextField label="Capture Excluded Apps" value={joinList(computerUse.localMacos.captureExcludedApps ?? [])} onChange={(value) => updateConfig('computerUse.localMacos.captureExcludedApps', splitList(value))} hint="Apps hidden from screenshots via ScreenCaptureKit (comma-separated)" />
+        <AppListPicker label="Capture Excluded Apps" value={computerUse.localMacos.captureExcludedApps ?? []} onChange={(value) => updateConfig('computerUse.localMacos.captureExcludedApps', value)} hint="Apps hidden from screenshots via ScreenCaptureKit. Our own app is always excluded by process ID." />
       </fieldset>
 
       <fieldset className="rounded-lg border p-3 space-y-3">

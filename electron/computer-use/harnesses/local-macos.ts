@@ -1,6 +1,6 @@
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { promisify } from 'node:util';
-import { nativeImage } from 'electron';
+import { BrowserWindow, nativeImage } from 'electron';
 import type {
   ComputerActionProposal,
   ComputerDisplayInfo,
@@ -266,6 +266,22 @@ export class LocalMacosHarness implements ComputerHarness {
     if (!permissions.helperReady) {
       throw new Error(permissions.message ?? 'Local macOS helper is unavailable.');
     }
+
+    // If any of our own windows are full-screened, exit full-screen first.
+    // macOS creates a dedicated Space for full-screen apps, and since we
+    // exclude our own PID from screenshots, the capture would be blank.
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed() && win.isFullScreen()) {
+        win.setFullScreen(false);
+        // Wait for the full-screen exit animation to complete
+        await new Promise<void>((resolve) => {
+          const onLeave = () => { resolve(); };
+          win.once('leave-full-screen', onLeave);
+          // Safety timeout in case the event doesn't fire
+          setTimeout(() => { win.removeListener('leave-full-screen', onLeave); resolve(); }, 2000);
+        });
+      }
+    }
   }
 
   async dispose(_sessionId: string): Promise<void> {
@@ -273,8 +289,21 @@ export class LocalMacosHarness implements ComputerHarness {
   }
 
   async captureFrame(session: ComputerSession): Promise<ComputerFrame> {
+    // If our app got full-screened mid-session (e.g. the AI did it),
+    // exit full-screen so screenshots aren't blank.
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed() && win.isFullScreen()) {
+        win.setFullScreen(false);
+        await new Promise<void>((resolve) => {
+          const onLeave = () => { resolve(); };
+          win.once('leave-full-screen', onLeave);
+          setTimeout(() => { win.removeListener('leave-full-screen', onLeave); resolve(); }, 2000);
+        });
+      }
+    }
+
     const config = this.getConfig();
-    const excludeApps = config.computerUse.localMacos.captureExcludedApps ?? ['Electron', 'Interlink'];
+    const excludeApps = config.computerUse.localMacos.captureExcludedApps ?? ['Electron'];
     const jpegQuality = config.computerUse.capture.jpegQuality ?? 0.8;
     const allowedDisplays = config.computerUse.localMacos.allowedDisplays;
 

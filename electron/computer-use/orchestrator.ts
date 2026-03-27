@@ -324,6 +324,14 @@ export class ComputerUseOrchestrator {
             throw error;
           }
         }
+
+        // Wait after executing actions so the screen has time to update
+        // before the next screenshot. This ensures the AI sees the result
+        // of its actions rather than a stale frame.
+        const postActionDelayMs = this.getConfig().computerUse?.postActionDelayMs ?? 300;
+        if (postActionDelayMs > 0) {
+          await new Promise((resolve) => setTimeout(resolve, postActionDelayMs));
+        }
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
