@@ -565,11 +565,14 @@ case "monitor":
       }
 
       let sourcePid = event.getIntegerValueField(.eventSourceUnixProcessID)
-      let sourceState = event.getIntegerValueField(.eventSourceStateID)
       let sourceTag = event.getIntegerValueField(.eventSourceUserData)
+      // Filter our own process and our tagged synthetic events.
+      // NOTE: We intentionally do NOT filter by sourceState == .privateState
+      // because third-party input software (Karabiner-Elements, Logi Options+,
+      // BetterTouchTool, SteerMouse, etc.) commonly injects events using
+      // privateState, and filtering those would silently suppress real human input.
       if sourcePid == Int64(getpid())
-        || sourceTag == syntheticEventTag
-        || sourceState == Int64(CGEventSourceStateID.privateState.rawValue) {
+        || sourceTag == syntheticEventTag {
         return Unmanaged.passUnretained(event)
       }
 
