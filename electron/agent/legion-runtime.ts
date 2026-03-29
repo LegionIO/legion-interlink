@@ -254,10 +254,15 @@ async function* streamDaemonLegion(options: StreamLegionOptions): AsyncGenerator
     return;
   }
 
+  const model = options.modelConfig.modelName || '';
+  const provider = toLegionProvider(options.modelConfig.provider);
+  if (!model) {
+    console.warn('[LegionRuntime] No model name configured, daemon inference will likely fail');
+  }
   const requestBody: Record<string, unknown> = {
     messages: normalizedMessages,
-    model: options.modelConfig.modelName,
-    provider: toLegionProvider(options.modelConfig.provider),
+    ...(model ? { model } : {}),
+    ...(provider ? { provider } : {}),
   };
   if (options.reasoningEffort) {
     requestBody.reasoning_effort = options.reasoningEffort;

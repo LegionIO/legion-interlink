@@ -109,15 +109,10 @@ export function registerKnowledgeHandlers(
       {}));
 
   ipcMain.handle('knowledge:health', async () =>
-    daemonGetWithFallback(cfg(), legionHome,
-      '/api/extensions/knowledge/runners/health/check',
-      '/api/lex/knowledge/health'));
+    daemonGet(cfg(), legionHome, '/api/apollo/stats'));
 
   ipcMain.handle('knowledge:maintain', async () =>
-    daemonPostWithFallback(cfg(), legionHome,
-      '/api/extensions/knowledge/runners/maintenance/run',
-      '/api/lex/knowledge/maintain',
-      {}));
+    daemonPost(cfg(), legionHome, '/api/apollo/maintenance', {}));
 
   ipcMain.handle('knowledge:status', async () =>
     daemonGet(cfg(), legionHome, '/api/apollo/status'));

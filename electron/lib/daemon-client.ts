@@ -101,6 +101,31 @@ export async function daemonPost<T = unknown>(
   }
 }
 
+export async function daemonPatch<T = unknown>(
+  config: LegionConfig,
+  legionHome: string,
+  path: string,
+  body: unknown,
+): Promise<DaemonResult<T>> {
+  const base = resolveDaemonUrl(config);
+  try {
+    const resp = await fetch(new URL(path, base).toString(), {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', ...authHeaders(config, legionHome) },
+      body: JSON.stringify(body),
+      ...withTimeout(),
+    });
+    if (!resp.ok) {
+      const errBody = await resp.json().catch(() => ({})) as { error?: { message?: string } };
+      return { ok: false, error: errBody.error?.message || `HTTP ${resp.status}` };
+    }
+    const data = await resp.json().catch(() => ({})) as { data?: T };
+    return { ok: true, data: (data.data ?? data) as T };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 export async function daemonPut<T = unknown>(
   config: LegionConfig,
   legionHome: string,

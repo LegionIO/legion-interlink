@@ -7,6 +7,7 @@ import {
   withTimeout,
   daemonGet,
   daemonPost,
+  daemonPatch,
   daemonPut,
   daemonDelete,
 } from '../lib/daemon-client.js';
@@ -65,7 +66,7 @@ export function registerDaemonApiHandlers(
     daemonGet(cfg(), legionHome, `/api/workers/${id}/costs`));
 
   ipcMain.handle('daemon:worker-lifecycle', async (_e, id: string, body: unknown) =>
-    daemonPost(cfg(), legionHome, `/api/workers/${id}/lifecycle`, body));  // PATCH mapped to POST
+    daemonPatch(cfg(), legionHome, `/api/workers/${id}/lifecycle`, body));
 
   // ── Schedules ──
   ipcMain.handle('daemon:schedules', async () =>
@@ -325,7 +326,7 @@ export function registerDaemonApiHandlers(
     daemonGet(cfg(), legionHome, '/api/gaia/status'));
 
   ipcMain.handle('daemon:gaia-events', async (_e, filters?: { limit?: string }) =>
-    daemonGet(cfg(), legionHome, '/api/gaia/events', filters));
+    daemonGet(cfg(), legionHome, '/api/gaia/buffer', filters));
 
   // ── Cost / Metering ──
   ipcMain.handle('daemon:metering', async (_e, filters?: Record<string, string>) =>
