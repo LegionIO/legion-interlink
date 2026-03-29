@@ -30,11 +30,11 @@ export function KnowledgeComposerPopover() {
   const { config, updateConfig } = useConfig();
   const [open, setOpen] = useState(false);
   const [daemonOk, setDaemonOk] = useState<boolean | null>(null);
-  const [entryCount, setEntryCount] = useState<number | null>(null);
+  const [dataConnected, setDataConnected] = useState<boolean | null>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
-  const ragEnabled = (config?.knowledge as { ragEnabled?: boolean } | undefined)?.ragEnabled ?? false;
+  const ragEnabled = (config?.knowledge as { ragEnabled?: boolean } | undefined)?.ragEnabled ?? true;
   const captureEnabled = (config?.knowledge as { captureEnabled?: boolean } | undefined)?.captureEnabled ?? false;
   const scope: Scope = ((config?.knowledge as { scope?: string } | undefined)?.scope as Scope | undefined) ?? 'all';
 
@@ -43,16 +43,17 @@ export function KnowledgeComposerPopover() {
   const fetchStatus = useCallback(async () => {
     try {
       const result = await legion.knowledge.status();
-      setDaemonOk(result.ok);
       if (result.ok && result.data) {
-        const d = result.data as { entry_count?: number };
-        setEntryCount(d.entry_count ?? null);
+        const d = result.data as { available?: boolean; data_connected?: boolean };
+        setDaemonOk(d.available === true);
+        setDataConnected(d.data_connected ?? null);
       } else {
-        setEntryCount(null);
+        setDaemonOk(false);
+        setDataConnected(null);
       }
     } catch {
       setDaemonOk(false);
-      setEntryCount(null);
+      setDataConnected(null);
     }
   }, []);
 
@@ -122,7 +123,7 @@ export function KnowledgeComposerPopover() {
               <>
                 <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400" />
                 <span className="text-xs text-emerald-400">
-                  Connected{entryCount !== null ? ` — ${entryCount} entries` : ''}
+                  Connected{dataConnected === false ? ' — data offline' : ''}
                 </span>
               </>
             ) : (

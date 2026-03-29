@@ -33,8 +33,8 @@ export function KnowledgePanel({ onClose }: Props) {
     const result = await legion.knowledge.status();
     setDaemonOk(result.ok);
     if (result.ok && result.data) {
-      const d = result.data as { entry_count?: number };
-      setStatusText(`${d.entry_count ?? '?'} entries`);
+      const d = result.data as { available?: boolean; data_connected?: boolean };
+      setStatusText(d.available === true ? 'Connected' : 'Unavailable');
     } else {
       setStatusText(result.error || 'Unavailable');
     }

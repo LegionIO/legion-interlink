@@ -6,7 +6,6 @@ import { QueryResultCard, type KnowledgeResult } from './QueryResultCard';
 import { SynthesizedAnswer } from './SynthesizedAnswer';
 
 type Scope = 'all' | 'global' | 'local';
-type Mode = 'synthesized' | 'raw';
 
 interface QueryResponse {
   results?: KnowledgeResult[];
@@ -23,7 +22,7 @@ const SCOPES: { value: Scope; label: string }[] = [
 export const QueryTab: FC = () => {
   const [query, setQuery] = useState('');
   const [scope, setScope] = useState<Scope>('all');
-  const [mode, setMode] = useState<Mode>('synthesized');
+  const [synthesize, setSynthesize] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [response, setResponse] = useState<QueryResponse | null>(null);
@@ -39,13 +38,7 @@ export const QueryTab: FC = () => {
     setHasSearched(true);
 
     try {
-      let result: { ok: boolean; data?: unknown; error?: string };
-
-      if (mode === 'synthesized') {
-        result = await legion.knowledge.query(q, scope, true);
-      } else {
-        result = await legion.knowledge.retrieve(q, scope, 20);
-      }
+      const result = await legion.knowledge.query(q, scope, synthesize);
 
       if (result.ok) {
         setResponse((result.data as QueryResponse) ?? {});
@@ -57,7 +50,7 @@ export const QueryTab: FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [query, scope, mode]);
+  }, [query, scope, synthesize]);
 
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
@@ -116,9 +109,9 @@ export const QueryTab: FC = () => {
       <div className="flex items-center gap-1 rounded-lg border border-border/50 bg-card/30 p-1 w-fit">
         <button
           type="button"
-          onClick={() => setMode('synthesized')}
+          onClick={() => setSynthesize(true)}
           className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-            mode === 'synthesized'
+            synthesize
               ? 'bg-primary text-primary-foreground'
               : 'text-muted-foreground hover:text-foreground'
           }`}
@@ -128,9 +121,9 @@ export const QueryTab: FC = () => {
         </button>
         <button
           type="button"
-          onClick={() => setMode('raw')}
+          onClick={() => setSynthesize(false)}
           className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-            mode === 'raw'
+            !synthesize
               ? 'bg-primary text-primary-foreground'
               : 'text-muted-foreground hover:text-foreground'
           }`}
@@ -151,7 +144,7 @@ export const QueryTab: FC = () => {
       {!loading && response !== null && (
         <div className="space-y-3">
           {/* Synthesized answer (synthesized mode only) */}
-          {mode === 'synthesized' && response.answer && (
+          {synthesize && response.answer && (
             <SynthesizedAnswer answer={response.answer} sources={response.sources} />
           )}
 

@@ -256,8 +256,9 @@ async function* streamDaemonLegion(options: StreamLegionOptions): AsyncGenerator
 
   // Let the daemon use its own model/provider defaults.
   // Only forward model/provider if explicitly configured for daemon override.
-  const daemonModelOverride = options.config.runtime?.legion?.model as string | undefined;
-  const daemonProviderOverride = options.config.runtime?.legion?.provider as string | undefined;
+  const legionRuntime = options.config.runtime?.legion as Record<string, unknown> | undefined;
+  const daemonModelOverride = legionRuntime?.model as string | undefined;
+  const daemonProviderOverride = legionRuntime?.provider as string | undefined;
   const requestBody: Record<string, unknown> = {
     messages: normalizedMessages,
     ...(daemonModelOverride ? { model: daemonModelOverride } : {}),

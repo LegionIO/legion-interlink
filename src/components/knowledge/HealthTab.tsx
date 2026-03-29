@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   CheckCircleIcon,
-  AlertTriangleIcon,
   WrenchIcon,
   RefreshCwIcon,
   Loader2Icon,
@@ -10,11 +9,11 @@ import {
 import { legion } from '@/lib/ipc-client';
 
 interface HealthData {
-  entry_count?: number;
-  orphan_count?: number;
-  index_status?: string;
-  quality_score?: number;
-  last_maintenance?: string;
+  total_entries?: number;
+  by_status?: Record<string, number>;
+  by_content_type?: Record<string, number>;
+  recent_24h?: number;
+  avg_confidence?: number;
 }
 
 type LoadState = 'loading' | 'loaded' | 'error';
@@ -106,62 +105,63 @@ export function HealthTab() {
   }
 
   const h = health ?? {};
-  const qualityPct = h.quality_score !== undefined ? Math.round(h.quality_score) : null;
+  const confidencePct = h.avg_confidence !== undefined ? Math.round(h.avg_confidence * 100) : null;
+  const activeCount = h.by_status?.['active'];
+  const archivedCount = h.by_status?.['archived'];
 
   return (
     <div className="p-6 space-y-6">
       {/* Status cards */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        {/* Entries */}
+        {/* Total Entries */}
         <div className="rounded-lg border border-border/50 bg-card/30 p-4 space-y-1">
-          <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Entries</p>
+          <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Total Entries</p>
           <p className="text-2xl font-bold">
-            {h.entry_count !== undefined ? h.entry_count.toLocaleString() : '—'}
+            {h.total_entries !== undefined ? h.total_entries.toLocaleString() : '—'}
           </p>
         </div>
 
-        {/* Orphans */}
+        {/* Recent (24h) */}
         <div className="rounded-lg border border-border/50 bg-card/30 p-4 space-y-1">
-          <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Orphans</p>
-          <p className={`text-2xl font-bold ${h.orphan_count !== undefined && h.orphan_count > 0 ? 'text-amber-400' : ''}`}>
-            {h.orphan_count !== undefined ? h.orphan_count.toLocaleString() : '—'}
+          <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Last 24h</p>
+          <p className="text-2xl font-bold">
+            {h.recent_24h !== undefined ? h.recent_24h.toLocaleString() : '—'}
           </p>
         </div>
 
-        {/* Index */}
+        {/* Active / Archived */}
         <div className="rounded-lg border border-border/50 bg-card/30 p-4 space-y-1">
-          <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Index</p>
-          {h.index_status !== undefined ? (
-            <div className="flex items-center gap-2 pt-1">
-              {h.index_status === 'healthy' ? (
-                <CheckCircleIcon className="h-5 w-5 text-emerald-400 shrink-0" />
-              ) : (
-                <AlertTriangleIcon className="h-5 w-5 text-amber-400 shrink-0" />
-              )}
-              <span className="text-sm font-medium capitalize">{h.index_status}</span>
-            </div>
-          ) : (
-            <p className="text-2xl font-bold">—</p>
+          <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Active</p>
+          <p className="text-2xl font-bold">
+            {activeCount !== undefined ? activeCount.toLocaleString() : '—'}
+          </p>
+          {archivedCount !== undefined && (
+            <p className="text-xs text-muted-foreground">{archivedCount.toLocaleString()} archived</p>
           )}
         </div>
 
-        {/* Quality */}
+        {/* Avg Confidence */}
         <div className="rounded-lg border border-border/50 bg-card/30 p-4 space-y-1">
-          <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Quality</p>
-          <p className={`text-2xl font-bold ${qualityPct !== null ? qualityColor(qualityPct) : ''}`}>
-            {qualityPct !== null ? `${qualityPct}%` : '—'}
+          <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Avg Confidence</p>
+          <p className={`text-2xl font-bold ${confidencePct !== null ? qualityColor(confidencePct) : ''}`}>
+            {confidencePct !== null ? `${confidencePct}%` : '—'}
           </p>
         </div>
       </div>
 
-      {/* Last maintenance */}
-      {h.last_maintenance && (
-        <p className="text-xs text-muted-foreground">
-          Last maintenance:{' '}
-          <span className="text-foreground">
-            {new Date(h.last_maintenance).toLocaleString()}
-          </span>
-        </p>
+      {/* Content type breakdown */}
+      {h.by_content_type && Object.keys(h.by_content_type).length > 0 && (
+        <div className="rounded-lg border border-border/50 bg-card/30 p-4 space-y-2">
+          <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">By Content Type</p>
+          <div className="flex flex-wrap gap-3">
+            {Object.entries(h.by_content_type).map(([type, count]) => (
+              <span key={type} className="flex items-center gap-1.5 text-sm">
+                <span className="capitalize text-foreground">{type}</span>
+                <span className="text-muted-foreground">{(count as number).toLocaleString()}</span>
+              </span>
+            ))}
+          </div>
+        </div>
       )}
 
       {/* Actions */}
