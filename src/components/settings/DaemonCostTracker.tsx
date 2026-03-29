@@ -99,12 +99,16 @@ const RollupChart: FC<{ data: RollupEntry[] }> = ({ data }) => {
   );
 };
 
+const PERIODS = ['daily', 'weekly', 'monthly'] as const;
+type Period = typeof PERIODS[number];
+
 export const DaemonCostTracker: FC<SettingsProps> = () => {
   const [loading, setLoading] = useState(true);
   const [summary, setSummary] = useState<MeteringData | null>(null);
   const [byModel, setByModel] = useState<ModelCost[]>([]);
   const [rollup, setRollup] = useState<RollupEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [period, setPeriod] = useState<Period>('daily');
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -113,7 +117,7 @@ export const DaemonCostTracker: FC<SettingsProps> = () => {
       const [mRes, modelRes, rollupRes] = await Promise.all([
         legion.daemon.metering(),
         legion.daemon.meteringByModel(),
-        legion.daemon.meteringRollup(),
+        legion.daemon.meteringRollup({ period }),
       ]);
 
       if (mRes.ok && mRes.data) {
@@ -136,7 +140,7 @@ export const DaemonCostTracker: FC<SettingsProps> = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [period]);
 
   useEffect(() => { void refresh(); }, [refresh]);
 
@@ -209,7 +213,25 @@ export const DaemonCostTracker: FC<SettingsProps> = () => {
           {/* Usage trend chart */}
           {rollup.length > 0 && (
             <div className="space-y-2">
-              <h4 className="text-xs font-medium text-muted-foreground">Daily Usage Trend</h4>
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-medium text-muted-foreground">Usage Trend</h4>
+                <div className="flex gap-1">
+                  {PERIODS.map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => setPeriod(p)}
+                      className={`rounded-md px-2 py-1 text-[10px] font-medium transition-colors ${
+                        period === p
+                          ? 'bg-primary/15 text-primary'
+                          : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                      }`}
+                    >
+                      {p.charAt(0).toUpperCase() + p.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <div className="rounded-xl border border-border/40 bg-card/40 p-4">
                 <RollupChart data={rollup.slice(-14)} />
               </div>

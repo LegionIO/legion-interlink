@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, type FC } from 'react';
+import { useState, useEffect, useCallback, useRef, type FC } from 'react';
 import { BrainCircuitIcon, RefreshCwIcon, Loader2Icon, AlertCircleIcon, TrashIcon, SearchIcon, PencilIcon, CheckIcon, XIcon } from 'lucide-react';
 import type { SettingsProps } from './shared';
 import { legion } from '@/lib/ipc-client';
@@ -33,15 +33,23 @@ export const DaemonMemoryInspector: FC<SettingsProps> = () => {
   const [error, setError] = useState<string | null>(null);
   const [storeFilter, setStoreFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [expanded, setExpanded] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [editContent, setEditContent] = useState('');
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => {
+    clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(debounceRef.current);
+  }, [search]);
 
   const fetchEntries = useCallback(async () => {
     setLoading(true);
     const filters: Record<string, string> = { limit: '100' };
     if (storeFilter !== 'all') filters.type = storeFilter;
-    if (search) filters.query = search;
+    if (debouncedSearch) filters.query = debouncedSearch;
 
     const [entriesRes, statsRes] = await Promise.all([
       legion.daemon.memoryEntries(filters),
@@ -61,7 +69,7 @@ export const DaemonMemoryInspector: FC<SettingsProps> = () => {
     }
 
     setLoading(false);
-  }, [storeFilter, search]);
+  }, [storeFilter, debouncedSearch]);
 
   useEffect(() => { fetchEntries(); }, [fetchEntries]);
 

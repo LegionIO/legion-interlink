@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, type FC } from 'react';
-import { NetworkIcon, CircleIcon, RefreshCwIcon, Loader2Icon, AlertTriangleIcon, HeartPulseIcon, WifiIcon, WifiOffIcon } from 'lucide-react';
+import { NetworkIcon, CircleIcon, RefreshCwIcon, Loader2Icon, AlertTriangleIcon, HeartPulseIcon, WifiIcon, WifiOffIcon, PlayIcon, PauseIcon } from 'lucide-react';
 import { legion } from '@/lib/ipc-client';
 import type { SettingsProps } from './shared';
 
@@ -129,6 +129,7 @@ export const DaemonMesh: FC<SettingsProps> = () => {
   const [status, setStatus] = useState<MeshStatus | null>(null);
   const [peers, setPeers] = useState<MeshPeer[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [live, setLive] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -159,11 +160,11 @@ export const DaemonMesh: FC<SettingsProps> = () => {
 
   useEffect(() => { void refresh(); }, [refresh]);
 
-  // Auto-refresh every 10 seconds
   useEffect(() => {
+    if (!live) return;
     const interval = setInterval(() => { void refresh(); }, 10_000);
     return () => clearInterval(interval);
-  }, [refresh]);
+  }, [refresh, live]);
 
   if (error && !status) {
     return (
@@ -189,14 +190,24 @@ export const DaemonMesh: FC<SettingsProps> = () => {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold">Agent Mesh Topology</h3>
-        <button
-          type="button"
-          onClick={() => void refresh()}
-          disabled={loading}
-          className="rounded-md p-1 hover:bg-muted/60 disabled:opacity-50"
-        >
-          <RefreshCwIcon className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setLive((v) => !v)}
+            title={live ? 'Stop auto-refresh' : 'Start auto-refresh (10s)'}
+            className={`rounded-md p-1 transition-colors ${live ? 'bg-emerald-500/15 text-emerald-500' : 'text-muted-foreground hover:bg-muted/60'}`}
+          >
+            {live ? <PauseIcon className="h-3.5 w-3.5" /> : <PlayIcon className="h-3.5 w-3.5" />}
+          </button>
+          <button
+            type="button"
+            onClick={() => void refresh()}
+            disabled={loading}
+            className="rounded-md p-1 hover:bg-muted/60 disabled:opacity-50"
+          >
+            <RefreshCwIcon className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
       </div>
 
       {loading && !status ? (
