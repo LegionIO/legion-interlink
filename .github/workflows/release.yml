@@ -29,6 +29,8 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
 
       - uses: actions/setup-node@v4
         with:
@@ -53,6 +55,8 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
 
       - uses: actions/setup-node@v4
         with:
@@ -158,6 +162,8 @@ jobs:
           ref: ${{ needs.prepare-release.outputs.tag }}
 
       - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
 
       - uses: actions/setup-node@v4
         with:
@@ -209,7 +215,6 @@ jobs:
             --pattern "$ASSET_NAME" \
             --repo "${{ github.repository }}" \
             --output interlink.dmg
-
           sha=$(shasum -a 256 interlink.dmg | awk '{print $1}')
           echo "sha256=$sha" >> "$GITHUB_OUTPUT"
           echo "asset_name_url=${ASSET_NAME// /%20}" >> "$GITHUB_OUTPUT"
