@@ -622,7 +622,7 @@ function AppShell() {
   // the window. Switch to the computer-use tab so the user sees the session.
   useEffect(() => {
     return legion.computerUse.onFocusThread(() => {
-      setSettingsOpen(false);
+      setActiveView('chat');
       setThreadMode('computer');
     });
   }, []);
