@@ -5,8 +5,7 @@ import { EditableInput } from '@/components/EditableInput';
 import { useComputerUse } from '@/providers/ComputerUseProvider';
 import type { ConversationRecord } from '@/providers/RuntimeProvider';
 import type { ComputerSession } from '../../../shared/computer-use';
-import { GaiaPresenceIndicator } from './GaiaPresenceIndicator';
-import { GaiaThreadEntry } from './GaiaThreadEntry';
+import { TriggerWorkflows } from './TriggerWorkflows';
 
 type ConversationSummary = Pick<
   ConversationRecord,
@@ -309,12 +308,7 @@ export const ConversationList: FC<ConversationListProps> = ({
         </div>
       </div>
 
-      <div className="px-3 pb-2 border-b border-sidebar-border">
-        <GaiaThreadEntry
-          activeConversationId={activeConversationId}
-          onSelect={handleClearUnread}
-        />
-      </div>
+      <TriggerWorkflows onSelectConversation={onSwitchConversation} />
 
       <div className="flex-1 overflow-y-auto px-3">
         {(() => {
@@ -401,8 +395,6 @@ export const ConversationList: FC<ConversationListProps> = ({
           </p>
         )}
       </div>
-
-      <GaiaPresenceIndicator />
 
       {/* Delete all / delete searched — bottom of sidebar */}
       {filteredConversations.length > 0 && (
