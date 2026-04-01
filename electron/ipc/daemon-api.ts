@@ -18,6 +18,7 @@ export function registerDaemonApiHandlers(
   appHome: string,
   getConfig: () => AppConfig,
   getWindows: () => BrowserWindow[],
+  onSseEvent?: (event: unknown) => void,
 ): void {
   const cfg = () => getConfig();
 
@@ -211,6 +212,7 @@ export function registerDaemonApiHandlers(
                 if (data) {
                   try {
                     const event = JSON.parse(data);
+                    onSseEvent?.(event);
                     for (const win of getWindows()) {
                       win.webContents.send('daemon:event', event);
                     }
