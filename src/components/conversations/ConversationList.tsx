@@ -6,6 +6,7 @@ import { useComputerUse } from '@/providers/ComputerUseProvider';
 import type { ConversationRecord } from '@/providers/RuntimeProvider';
 import type { ComputerSession } from '../../../shared/computer-use';
 import { GaiaPresenceIndicator } from './GaiaPresenceIndicator';
+import { GaiaThreadEntry } from './GaiaThreadEntry';
 
 type ConversationSummary = Pick<
   ConversationRecord,
@@ -306,6 +307,13 @@ export const ConversationList: FC<ConversationListProps> = ({
             </button>
           )}
         </div>
+      </div>
+
+      <div className="px-3 pb-2 border-b border-sidebar-border">
+        <GaiaThreadEntry
+          activeConversationId={activeConversationId}
+          onSelect={handleClearUnread}
+        />
       </div>
 
       <div className="flex-1 overflow-y-auto px-3">
