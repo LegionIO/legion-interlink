@@ -966,6 +966,21 @@ export function RuntimeProvider({
   const branchInfo = useMemo(() => {
     if (isRunning) return null; // don't show branches while generating
     const branch = getActiveBranch(tree, headId);
+    const isDaemon = backendModeRef.current === 'legion-daemon';
+
+    if (isDaemon) {
+      // Daemon mode: find the last non-sidechain assistant message and its siblings
+      const lastAssistant = [...branch].reverse().find((m) => m.role === 'assistant' && !m.sidechain);
+      if (!lastAssistant) return null;
+      const parentId = lastAssistant.parentId;
+      // Exclude sidechain messages from branch siblings — they are parallel work, not alternatives
+      const siblings = tree.filter((m) => m.parentId === parentId && m.role === 'assistant' && !m.sidechain);
+      if (siblings.length <= 1) return null;
+      const currentIdx = siblings.findIndex((m) => m.id === lastAssistant.id);
+      return { siblings, currentIdx, total: siblings.length, parentId };
+    }
+
+    // Mastra mode: existing tree-based logic
     const lastAssistant = [...branch].reverse().find((m) => m.role === 'assistant');
     if (!lastAssistant) return null;
     const parentId = lastAssistant.parentId;
@@ -1563,8 +1578,13 @@ export function RuntimeProvider({
   const goToBranch = useCallback((siblingId: string) => {
     // Walk from this sibling down to the deepest descendant on the "latest" path
     let newHead = siblingId;
+    const isDaemon = backendModeRef.current === 'legion-daemon';
     // Find the deepest child chain from this sibling
-    const childrenOf = (parentId: string) => tree.filter((m) => m.parentId === parentId);
+    const childrenOf = (parentId: string) => {
+      const all = tree.filter((m) => m.parentId === parentId);
+      // In daemon mode, prefer non-sidechain children for the main branch path
+      return isDaemon ? all.filter((m) => !m.sidechain) : all;
+    };
     let children = childrenOf(newHead);
     while (children.length > 0) {
       newHead = children[children.length - 1].id; // take last child (most recent)
