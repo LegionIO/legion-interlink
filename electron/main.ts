@@ -21,6 +21,7 @@ import { registerRealtimeHandlers, updateActiveRealtimeSessionTools } from './ip
 import type { AppConfig } from './config/schema.js';
 import { registerComputerUseHandlers } from './ipc/computer-use.js';
 import { registerKnowledgeHandlers } from './ipc/knowledge.js';
+import { registerGaiaThreadHandlers } from './ipc/gaia-thread.js';
 import { registerClipboardHandlers } from './ipc/clipboard.js';
 import { closeAllOverlayWindows } from './computer-use/overlay-window.js';
 
@@ -426,6 +427,7 @@ if (gotSingleInstanceLock) {
     registerComputerUseHandlers(ipcMain, APP_HOME, getConfig);
     registerKnowledgeHandlers(ipcMain, APP_HOME, getConfig);
     registerClipboardHandlers(ipcMain);
+    registerGaiaThreadHandlers(ipcMain, APP_HOME);
 
     // Auto-seed computer use display settings on startup.
     // If allowedDisplays is empty, populate it with all discovered displays
