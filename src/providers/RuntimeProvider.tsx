@@ -80,6 +80,10 @@ type StoredMessage = ThreadMessageLike & {
   id: string;
   parentId: string | null;
   tokenUsage?: TokenUsageData;
+  // Daemon chain fields (populated only in daemon backend mode)
+  sidechain?: boolean;
+  messageGroupId?: string;
+  agentId?: string;
 };
 
 export type ConversationRecord = {
@@ -112,6 +116,8 @@ export type ConversationRecord = {
   parentToolCallId?: string | null;
   subAgentDepth?: number;
   isSubAgent?: boolean;
+  // Backend mode — set once at conversation creation
+  backendMode?: 'mastra' | 'legion-daemon';
 };
 
 export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
