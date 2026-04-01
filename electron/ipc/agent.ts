@@ -386,6 +386,8 @@ export function registerAgentHandlers(ipcMain: IpcMain, appHome: string): void {
             })
             .filter(Boolean) as Array<{ name: string; description: string; input_schema: Record<string, unknown> }>;
 
+          console.info(`[Agent] Forwarding ${toolSchemas.length} tools to daemon:`, toolSchemas.map((t) => t.name));
+
           const stream = streamAppAgent({
             conversationId,
             messages: daemonMessages,
