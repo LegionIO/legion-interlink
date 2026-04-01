@@ -1,4 +1,5 @@
 import type { IpcMain, BrowserWindow } from 'electron';
+import { Notification } from 'electron';
 import type { AppConfig } from '../config/schema.js';
 import {
   DAEMON_TIMEOUT_MS,
@@ -212,6 +213,27 @@ export function registerDaemonApiHandlers(
                     const event = JSON.parse(data);
                     for (const win of getWindows()) {
                       win.webContents.send('daemon:event', event);
+                    }
+
+                    // Native notification for proactive events when app is backgrounded
+                    const evt = event as Record<string, unknown>;
+                    const eventType = String(evt.type || evt.event || evt.kind || '');
+                    if (eventType.startsWith('proactive.') || eventType === 'gaia.proactive') {
+                      const anyFocused = getWindows().some((w) => w.isFocused());
+                      if (!anyFocused && Notification.isSupported()) {
+                        const body = String(evt.content || evt.message || evt.text || 'New activity');
+                        const n = new Notification({ title: 'GAIA', body, silent: false });
+                        n.on('click', () => {
+                          const win = getWindows().find((w) => !w.isDestroyed());
+                          if (win) {
+                            if (win.isMinimized()) win.restore();
+                            if (!win.isVisible()) win.show();
+                            win.focus();
+                            win.webContents.send('gaia-thread:focus');
+                          }
+                        });
+                        n.show();
+                      }
                     }
                   } catch {
                     // non-JSON SSE data, forward as-is
