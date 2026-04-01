@@ -866,6 +866,7 @@ export function RuntimeProvider({
   const treeRef = useRef<StoredMessage[]>([]);
   const headIdRef = useRef<string | null>(null);
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const backendModeRef = useRef<'mastra' | 'legion-daemon'>('mastra');
   const onModelFallbackRef = useRef(onModelFallback);
   onModelFallbackRef.current = onModelFallback;
   const onConversationSettingsLoadedRef = useRef(onConversationSettingsLoaded);
@@ -989,6 +990,9 @@ export function RuntimeProvider({
       void persistConversation(id, t, h, { runStatus: 'idle' });
     }
 
+    // Restore backend mode from persisted conversation
+    backendModeRef.current = conv.backendMode ?? 'mastra';
+
     // Restore per-conversation settings (model, profile, fallback)
     onConversationSettingsLoadedRef.current?.({
       selectedModelKey: conv.selectedModelKey ?? null,
@@ -1010,6 +1014,13 @@ export function RuntimeProvider({
         }
         const newId = crypto.randomUUID();
         const now = nowIso();
+        // Detect backend mode for new conversation
+        let detectedBackend: 'mastra' | 'legion-daemon' = 'mastra';
+        try {
+          const status = await app.agent.appStatus() as { backend?: string } | null;
+          if (status?.backend === 'legion-daemon') detectedBackend = 'legion-daemon';
+        } catch { /* default to mastra */ }
+        backendModeRef.current = detectedBackend;
         await app.conversations.put({
           id: newId, title: null, fallbackTitle: null, messages: [], messageTree: [], headId: null,
           conversationCompaction: null, lastContextUsage: null,
@@ -1018,6 +1029,7 @@ export function RuntimeProvider({
           messageCount: 0, userMessageCount: 0,
           runStatus: 'idle', hasUnread: false, lastAssistantUpdateAt: null,
           selectedModelKey: null,
+          backendMode: detectedBackend,
         } as ConversationRecord);
         await app.conversations.setActiveId(newId);
         setActiveConversationId(newId);
@@ -1064,6 +1076,11 @@ export function RuntimeProvider({
         parentToolCallId?: string;
         status?: string;
         summary?: string;
+        // Daemon chain fields (present when backend is legion-daemon)
+        parent_id?: string;
+        sidechain?: boolean;
+        message_group_id?: string;
+        agent_id?: string;
       };
 
       // Route sub-agent events to global sub-agent state
@@ -1400,6 +1417,24 @@ export function RuntimeProvider({
           setHeadId(acc.headId);
         }
         return;
+      }
+
+      // Apply daemon chain fields to the current assistant message when in daemon mode
+      if (backendModeRef.current === 'legion-daemon' && (e.sidechain != null || e.message_group_id || e.agent_id)) {
+        const branch = getActiveBranch(acc.messages, acc.headId);
+        const last = branch[branch.length - 1];
+        if (last?.role === 'assistant') {
+          const idx = acc.messages.findIndex((m) => m.id === last.id);
+          if (idx >= 0) {
+            acc.messages[idx] = {
+              ...acc.messages[idx],
+              ...(e.sidechain != null ? { sidechain: e.sidechain } : {}),
+              ...(e.message_group_id ? { messageGroupId: e.message_group_id } : {}),
+              ...(e.agent_id ? { agentId: e.agent_id } : {}),
+              ...(e.parent_id ? { parentId: e.parent_id } : {}),
+            };
+          }
+        }
       }
 
       if (isActiveConv) {
