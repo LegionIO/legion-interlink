@@ -21,9 +21,9 @@ import { registerRealtimeHandlers, updateActiveRealtimeSessionTools } from './ip
 import type { AppConfig } from './config/schema.js';
 import { registerComputerUseHandlers } from './ipc/computer-use.js';
 import { registerKnowledgeHandlers } from './ipc/knowledge.js';
-import { registerGaiaThreadHandlers } from './ipc/gaia-thread.js';
 import { registerClipboardHandlers } from './ipc/clipboard.js';
 import { closeAllOverlayWindows } from './computer-use/overlay-window.js';
+import { registerTriggerDispatchHandlers, handleSseEvent } from './ipc/trigger-dispatch.js';
 
 const APP_HOME = join(homedir(), '.' + __BRAND_APP_SLUG);
 
@@ -421,13 +421,19 @@ if (gotSingleInstanceLock) {
     registerMemoryHandlers(ipcMain, APP_HOME, getConfig);
     registerSkillsHandlers(ipcMain, APP_HOME);
     registerDaemonSettingsHandlers(ipcMain, APP_HOME, getConfig);
-    registerDaemonApiHandlers(ipcMain, APP_HOME, getConfig, () => BrowserWindow.getAllWindows());
+    registerDaemonApiHandlers(
+      ipcMain,
+      APP_HOME,
+      getConfig,
+      () => BrowserWindow.getAllWindows(),
+      (event) => handleSseEvent(event, APP_HOME, getConfig, () => BrowserWindow.getAllWindows()),
+    );
+    registerTriggerDispatchHandlers(ipcMain);
     registerMicRecorderHandlers(ipcMain);
     registerLiveSttHandlers(ipcMain);
     registerComputerUseHandlers(ipcMain, APP_HOME, getConfig);
     registerKnowledgeHandlers(ipcMain, APP_HOME, getConfig);
     registerClipboardHandlers(ipcMain);
-    registerGaiaThreadHandlers(ipcMain, APP_HOME);
 
     // Auto-seed computer use display settings on startup.
     // If allowedDisplays is empty, populate it with all discovered displays

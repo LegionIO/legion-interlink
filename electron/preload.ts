@@ -66,18 +66,6 @@ const appAPI = {
     },
   },
 
-  // GAIA Thread
-  gaiaThread: {
-    ensure: () => ipcRenderer.invoke('gaia-thread:ensure'),
-    append: (msg: unknown) => ipcRenderer.invoke('gaia-thread:append', msg),
-    id: () => ipcRenderer.invoke('gaia-thread:id'),
-    onNewMessage: (callback: (msg: unknown) => void) => {
-      const handler = (_event: Electron.IpcRendererEvent, data: unknown) => callback(data);
-      ipcRenderer.on('gaia-thread:new-message', handler);
-      return () => ipcRenderer.removeListener('gaia-thread:new-message', handler);
-    },
-  },
-
   // Daemon
   daemon: {
     settings: () => ipcRenderer.invoke('daemon:settings'),
@@ -171,22 +159,6 @@ const appAPI = {
     ready: () => ipcRenderer.invoke('daemon:ready'),
     metrics: () => ipcRenderer.invoke('daemon:metrics'),
     doctor: () => ipcRenderer.invoke('daemon:doctor'),
-    structuralIndex: () => ipcRenderer.invoke('daemon:structural-index'),
-    structuralIndexRefresh: () => ipcRenderer.invoke('daemon:structural-index-refresh'),
-    toolAudit: (mode?: 'summary' | 'matrix' | 'issues') => ipcRenderer.invoke('daemon:tool-audit', mode),
-    stateDiffSnapshot: () => ipcRenderer.invoke('daemon:state-diff-snapshot'),
-    stateDiff: (snapshotId: string) => ipcRenderer.invoke('daemon:state-diff', snapshotId),
-    sessionsSearch: (query: string) => ipcRenderer.invoke('daemon:sessions-search', query),
-    triggers: () => ipcRenderer.invoke('daemon:triggers'),
-    trigger: (id: string) => ipcRenderer.invoke('daemon:trigger', id),
-    triggerCreate: (body: unknown) => ipcRenderer.invoke('daemon:trigger-create', body),
-    triggerUpdate: (id: string, body: unknown) => ipcRenderer.invoke('daemon:trigger-update', id, body),
-    triggerDelete: (id: string) => ipcRenderer.invoke('daemon:trigger-delete', id),
-    llmTokenBudget: () => ipcRenderer.invoke('daemon:llm-token-budget'),
-    llmTokenBudgetReset: () => ipcRenderer.invoke('daemon:llm-token-budget-reset'),
-    llmProviders: () => ipcRenderer.invoke('daemon:llm-providers'),
-    llmProviderLayer: () => ipcRenderer.invoke('daemon:llm-provider-layer'),
-    llmContextCurationStatus: () => ipcRenderer.invoke('daemon:llm-context-curation-status'),
   },
 
   // Memory management
@@ -404,6 +376,19 @@ const appAPI = {
     health: () => ipcRenderer.invoke('knowledge:health'),
     maintain: () => ipcRenderer.invoke('knowledge:maintain'),
     status: () => ipcRenderer.invoke('knowledge:status'),
+  },
+
+  // Trigger dispatch
+  triggerDispatch: {
+    activeWorkflows: () =>
+      ipcRenderer.invoke('trigger-dispatch:active-workflows'),
+    workflowStatus: (id: string) =>
+      ipcRenderer.invoke('trigger-dispatch:workflow-status', id),
+    onWorkflowUpdate: (callback: (workflow: unknown) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, workflow: unknown) => callback(workflow);
+      ipcRenderer.on('trigger-dispatch:workflow-update', handler);
+      return () => ipcRenderer.removeListener('trigger-dispatch:workflow-update', handler);
+    },
   },
 
   // Menu events
