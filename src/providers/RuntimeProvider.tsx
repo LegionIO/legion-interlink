@@ -1405,6 +1405,45 @@ export function RuntimeProvider({
     return unsubscribe;
   }, [bumpSubAgentVersion]);
 
+  // Listen for proactive GAIA messages and inject into the active conversation
+  useEffect(() => {
+    const unsub = app.gaiaThread.onNewMessage((raw: unknown) => {
+      const msg = raw as { id: string; intent: string; content: string; source: string; timestamp: string; metadata?: Record<string, unknown> };
+      const convId = activeIdRef.current;
+      if (!convId || !msg.content) return;
+
+      const proactiveMsg: StoredMessage = {
+        id: `proactive-${msg.id}`,
+        parentId: headIdRef.current,
+        role: 'assistant',
+        content: toStoredContent([{
+          type: 'text',
+          text: msg.content,
+          source: 'unspoken' as const,
+        }]),
+        createdAt: new Date(msg.timestamp),
+      };
+
+      // Attach proactive metadata for rendering
+      (proactiveMsg as StoredMessage & { proactiveMeta?: unknown }).proactiveMeta = {
+        intent: msg.intent,
+        source: msg.source,
+        timestamp: msg.timestamp,
+        ...msg.metadata,
+      };
+
+      const currentTree = treeRef.current;
+      const newTree = [...currentTree, proactiveMsg];
+      const newHead = proactiveMsg.id;
+      treeRef.current = newTree;
+      headIdRef.current = newHead;
+      setTree(newTree);
+      setHeadId(newHead);
+      schedulePersist(convId, newTree, newHead);
+    });
+    return unsub;
+  }, [schedulePersist]);
+
   const onNew = useCallback(async (message: AppendMessage) => {
     const convId = activeIdRef.current;
     if (!convId) return;

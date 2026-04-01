@@ -43,6 +43,7 @@ import { SubAgentInline } from './SubAgentInline';
 import { PipelineInsights } from './PipelineInsights';
 import type { PipelineEnrichments } from './PipelineInsights';
 import { TokenUsage } from './TokenUsage';
+import { ProactiveMessage } from './ProactiveMessage';
 import { ComposerInput } from './ComposerInput';
 import { DeviceRow } from './DeviceRow';
 import { SearchBar } from './SearchBar';
@@ -676,6 +677,24 @@ const AssistantMessage: FC = () => {
     p.type === 'tool-call' || (p.type === 'text' && p.text?.trim()),
   );
   const isEmpty = !isRunning && !hasContent;
+
+  // Detect proactive GAIA messages (injected with source: 'unspoken' and proactiveMeta)
+  const proactiveMeta = (message as { proactiveMeta?: { intent?: string; timestamp?: string } }).proactiveMeta;
+  const isProactive = proactiveMeta && content.length > 0
+    && content.every((p: { type: string; source?: string }) => p.type === 'text' && p.source === 'unspoken');
+  if (isProactive) {
+    const textContent = content
+      .filter((p: { type: string }) => p.type === 'text')
+      .map((p) => (p as { text?: string }).text ?? '')
+      .join('');
+    return (
+      <ProactiveMessage
+        intent={proactiveMeta.intent ?? 'insight'}
+        content={textContent}
+        timestamp={proactiveMeta.timestamp ?? message.createdAt?.toISOString() ?? new Date().toISOString()}
+      />
+    );
+  }
 
   // Check if this message has an interrupt (source: 'interrupt' or 'unspoken')
   const hasInterrupt = content.some((p: { type: string; source?: string }) =>
