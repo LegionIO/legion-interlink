@@ -350,7 +350,7 @@ export function registerDaemonApiHandlers(
     daemonGet(cfg(), appHome, '/api/gaia/status'));
 
   ipcMain.handle('daemon:gaia-events', async (_e, filters?: { limit?: string }) =>
-    daemonGet(cfg(), appHome, '/api/gaia/buffer', filters));
+    daemonGet(cfg(), appHome, '/api/gaia/ticks', filters));
 
   // ── Cost / Metering ──
   ipcMain.handle('daemon:metering', async (_e, filters?: Record<string, string>) =>
