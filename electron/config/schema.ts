@@ -418,6 +418,12 @@ const escalationConfigSchema = z.object({
   pipelineEnabled: z.boolean().default(true),
 });
 
+const messageChainsConfigSchema = z.object({
+  mode: z.enum(['auto', 'interlink', 'daemon']).default('auto'),
+  showSidechains: z.boolean().default(true),
+  collapseSidechainsByDefault: z.boolean().default(true),
+});
+
 const daemonLlmConfigSchema = z.object({
   contextCuration: contextCurationConfigSchema,
   debate: debateConfigSchema,
@@ -477,6 +483,7 @@ export const appConfigSchema = z.object({
   imageGeneration: imageGenerationConfigSchema.optional(),
   videoGeneration: videoGenerationConfigSchema.optional(),
   daemonLlm: daemonLlmConfigSchema.optional(),
+  messageChains: messageChainsConfigSchema.optional(),
 });
 
 export type AppConfig = z.infer<typeof appConfigSchema>;
@@ -488,3 +495,4 @@ export type TokenBudgetConfig = z.infer<typeof tokenBudgetConfigSchema>;
 export type ProviderLayerConfig = z.infer<typeof providerLayerConfigSchema>;
 export type TierRoutingConfig = z.infer<typeof tierRoutingConfigSchema>;
 export type EscalationConfig = z.infer<typeof escalationConfigSchema>;
+export type MessageChainsConfig = z.infer<typeof messageChainsConfigSchema>;
