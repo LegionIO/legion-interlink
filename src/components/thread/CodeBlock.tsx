@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback, memo, type FC } from 'react';
+import { useState, useMemo, useEffect, useLayoutEffect, useCallback, useRef, memo, type CSSProperties, type FC, type KeyboardEvent } from 'react';
 import ShikiHighlighter from 'react-shiki';
 import { CopyIcon, CheckIcon, BracketsIcon, MinimizeIcon, FileTextIcon } from 'lucide-react';
 import { copyTextToClipboard, logClipboardError } from '@/lib/clipboard';
@@ -356,6 +356,288 @@ export const CodeBlock: FC<CodeBlockProps> = memo(({ code: rawCode, language, is
         >
           {displayCode}
         </ShikiHighlighter>
+      </div>
+    </div>
+  );
+});
+
+type EditableCodeBlockProps = {
+  code: string;
+  language?: string;
+  onChange: (nextCode: string) => void;
+  onLanguageChange: (nextLanguage: string) => void;
+  registerHandle?: (handle: { focusStart: () => void; focusEnd: () => void } | null) => void;
+  onFocusEditor?: () => void;
+  onMoveCaretBefore?: () => void;
+  onMoveCaretAfter?: () => void;
+  className?: string;
+  autoFocus?: boolean;
+};
+
+export const EditableCodeBlock: FC<EditableCodeBlockProps> = memo(({
+  code,
+  language,
+  onChange,
+  onLanguageChange,
+  registerHandle,
+  onFocusEditor,
+  onMoveCaretBefore,
+  onMoveCaretAfter,
+  className,
+  autoFocus,
+}) => {
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [copied, setCopied] = useState(false);
+  const [detectedLang, setDetectedLang] = useState<string>(language || 'text');
+  const [scrollTop, setScrollTop] = useState(0);
+  const [scrollLeft, setScrollLeft] = useState(0);
+  const isEditorFocusedRef = useRef(false);
+  const selectionRef = useRef<{ start: number; end: number } | null>(null);
+
+  useEffect(() => {
+    if (language?.trim()) {
+      setDetectedLang(language.trim());
+      return;
+    }
+
+    let cancelled = false;
+    detectLanguage(code).then((lang) => {
+      if (!cancelled) setDetectedLang(lang);
+    });
+    return () => { cancelled = true; };
+  }, [code, language]);
+
+  useEffect(() => {
+    if (!autoFocus) return;
+    textareaRef.current?.focus();
+  }, [autoFocus]);
+
+  useLayoutEffect(() => {
+    registerHandle?.({
+      focusStart: () => {
+        const textarea = textareaRef.current;
+        if (!textarea) return;
+        isEditorFocusedRef.current = true;
+        textarea.focus();
+        textarea.setSelectionRange(0, 0);
+        selectionRef.current = { start: 0, end: 0 };
+      },
+      focusEnd: () => {
+        const textarea = textareaRef.current;
+        if (!textarea) return;
+        isEditorFocusedRef.current = true;
+        textarea.focus();
+        const end = code.length;
+        textarea.setSelectionRange(end, end);
+        selectionRef.current = { start: end, end };
+      },
+    });
+    return () => {
+      registerHandle?.(null);
+    };
+  }, [code.length, registerHandle]);
+
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current;
+    const selection = selectionRef.current;
+    if (!textarea || !selection || !isEditorFocusedRef.current) return;
+
+    textarea.focus();
+    textarea.setSelectionRange(selection.start, selection.end);
+  }, [code, language]);
+
+  const previewLanguage = language?.trim() || detectedLang || 'text';
+  const formatInfo = useFormatInfo(code, previewLanguage);
+  const editorHeight = Math.min(Math.max((code.split('\n').length + 1) * 20 + 24, 140), 340);
+  const editorTextStyle: CSSProperties = {
+    margin: 0,
+    padding: '1rem',
+    minHeight: editorHeight,
+    boxSizing: 'border-box',
+    fontSize: '0.75rem',
+    lineHeight: '1.25rem',
+    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+    tabSize: 2,
+    whiteSpace: 'pre',
+    overflowWrap: 'normal',
+  };
+
+  const handleCopy = useCallback(async () => {
+    try {
+      await copyTextToClipboard(code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (error) {
+      setCopied(false);
+      logClipboardError('Failed to copy code block', error);
+    }
+  }, [code]);
+
+  const applyTransform = useCallback((mode: Extract<ViewMode, 'beautify' | 'minify'>) => {
+    if (!formatInfo) return;
+    const nextCode = mode === 'beautify' ? formatInfo.beautified : formatInfo.minified;
+    if (!nextCode || nextCode === code) return;
+    onChange(nextCode);
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+    });
+  }, [code, formatInfo, onChange]);
+
+  const handleKeyDown = useCallback((event: KeyboardEvent<HTMLTextAreaElement>) => {
+    event.stopPropagation();
+    const textarea = textareaRef.current;
+
+    if (event.key === 'Tab') {
+      event.preventDefault();
+      if (!textarea) return;
+
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const nextCode = `${code.slice(0, start)}  ${code.slice(end)}`;
+      selectionRef.current = { start: start + 2, end: start + 2 };
+      onChange(nextCode);
+      requestAnimationFrame(() => {
+        textarea.focus();
+        textarea.setSelectionRange(start + 2, start + 2);
+      });
+    }
+
+    if (
+      textarea
+      && (event.key === 'ArrowLeft' || event.key === 'ArrowUp')
+      && !event.shiftKey
+      && !event.altKey
+      && !event.ctrlKey
+      && !event.metaKey
+      && textarea.selectionStart === textarea.selectionEnd
+      && textarea.selectionStart === 0
+    ) {
+      event.preventDefault();
+      onMoveCaretBefore?.();
+    }
+
+    if (
+      textarea
+      && (event.key === 'ArrowRight' || event.key === 'ArrowDown')
+      && !event.shiftKey
+      && !event.altKey
+      && !event.ctrlKey
+      && !event.metaKey
+      && textarea.selectionStart === textarea.selectionEnd
+      && textarea.selectionEnd === code.length
+    ) {
+      event.preventDefault();
+      onMoveCaretAfter?.();
+    }
+  }, [code, onChange, onMoveCaretAfter, onMoveCaretBefore]);
+
+  return (
+    <div className={`rounded-xl border border-border/70 bg-card/70 ${className ?? ''}`}>
+      <div className="flex items-center gap-2 border-b border-border/60 px-3 py-2">
+        <span className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Code</span>
+        <input
+          type="text"
+          value={language ?? ''}
+          onChange={(event) => onLanguageChange(event.target.value)}
+          onFocus={onFocusEditor}
+          onMouseDown={(event) => event.stopPropagation()}
+          onKeyDown={(event) => event.stopPropagation()}
+          placeholder="auto"
+          className="h-7 w-24 rounded-md border border-border/60 bg-background/60 px-2 text-[11px] font-medium outline-none focus:border-primary/60"
+        />
+        <div className="ml-auto flex items-center gap-1">
+          {formatInfo?.modes.includes('beautify') && (
+            <button
+              type="button"
+              onClick={() => applyTransform('beautify')}
+              title="Beautify code"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-background/80 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <BracketsIcon className="h-3.5 w-3.5" />
+            </button>
+          )}
+          {formatInfo?.modes.includes('minify') && (
+            <button
+              type="button"
+              onClick={() => applyTransform('minify')}
+              title="Minify code"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-background/80 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <MinimizeIcon className="h-3.5 w-3.5" />
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={handleCopy}
+            title="Copy code"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-background/80 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            {copied ? <CheckIcon className="h-3.5 w-3.5 text-green-500" /> : <CopyIcon className="h-3.5 w-3.5" />}
+          </button>
+        </div>
+      </div>
+      <div className="relative overflow-hidden rounded-b-xl" style={{ height: editorHeight }}>
+        <div className="pointer-events-none absolute inset-0 overflow-hidden">
+          <div style={{ transform: `translate(${-scrollLeft}px, ${-scrollTop}px)` }}>
+            <ShikiHighlighter
+              language={previewLanguage}
+              theme={{ light: 'light-plus', dark: 'dark-plus' }}
+              addDefaultStyles={false}
+              style={editorTextStyle}
+            >
+              {code || ' '}
+            </ShikiHighlighter>
+          </div>
+        </div>
+        <textarea
+          ref={textareaRef}
+          value={code}
+          onChange={(event) => {
+            onFocusEditor?.();
+            selectionRef.current = {
+              start: event.currentTarget.selectionStart,
+              end: event.currentTarget.selectionEnd,
+            };
+            onChange(event.target.value);
+          }}
+          onFocus={() => {
+            isEditorFocusedRef.current = true;
+            onFocusEditor?.();
+            const textarea = textareaRef.current;
+            if (textarea) {
+              selectionRef.current = {
+                start: textarea.selectionStart,
+                end: textarea.selectionEnd,
+              };
+            }
+          }}
+          onBlur={() => {
+            isEditorFocusedRef.current = false;
+          }}
+          onMouseDown={(event) => {
+            event.stopPropagation();
+            onFocusEditor?.();
+          }}
+          onKeyDown={handleKeyDown}
+          onScroll={(event) => {
+            setScrollTop(event.currentTarget.scrollTop);
+            setScrollLeft(event.currentTarget.scrollLeft);
+          }}
+          onSelect={(event) => {
+            selectionRef.current = {
+              start: event.currentTarget.selectionStart,
+              end: event.currentTarget.selectionEnd,
+            };
+          }}
+          spellCheck={false}
+          className="absolute inset-0 w-full resize-none overflow-auto border-0 bg-transparent outline-none"
+          style={{
+            color: 'transparent',
+            caretColor: 'var(--foreground)',
+            WebkitTextFillColor: 'transparent',
+            ...editorTextStyle,
+          }}
+        />
       </div>
     </div>
   );

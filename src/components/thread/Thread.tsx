@@ -9,15 +9,17 @@ import {
   useMessage,
   useComposerRuntime,
 } from '@assistant-ui/react';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import {
   SendHorizontalIcon,
   CopyIcon,
   CheckIcon,
   RefreshCwIcon,
   StopCircleIcon,
-  PaperclipIcon,
+  PlusIcon,
   XIcon,
   FileIcon,
+  FileTextIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   BanIcon,
@@ -29,15 +31,19 @@ import {
   ChevronUpIcon,
   PhoneIcon,
   MonitorIcon,
+  FolderOpenIcon,
+  ImageIcon,
 } from 'lucide-react';
 import { app } from '@/lib/ipc-client';
 import { copyTextToClipboard, logClipboardError } from '@/lib/clipboard';
 import { useAttachments } from '@/providers/AttachmentContext';
-import { useBranchNav, type TokenUsageData } from '@/providers/RuntimeProvider';
+import { useAssistantResponseTiming, useBranchNav, useCurrentWorkingDirectory, type TokenUsageData } from '@/providers/RuntimeProvider';
 import { useConfig } from '@/providers/ConfigProvider';
 import { useRealtime } from '@/providers/RealtimeProvider';
 import { isDictationSupportedForProvider, createUnifiedDictationAdapter, type DictationSession, type AudioProvider } from '@/lib/audio/speech-adapters';
 import { MarkdownText } from './MarkdownText';
+import { UserCodeMarkdown } from './UserCodeMarkdown';
+import { ElapsedBadge } from './ElapsedBadge';
 import { ToolCallDisplay } from './ToolGroup';
 import { SubAgentInline } from './SubAgentInline';
 import { SidechainGroup } from './SidechainGroup';
@@ -46,6 +52,7 @@ import type { PipelineEnrichments } from './PipelineInsights';
 import { TokenUsage } from './TokenUsage';
 import { ProactiveMessage } from './ProactiveMessage';
 import { ComposerInput } from './ComposerInput';
+import { RichChatInput } from './RichChatInput';
 import { DeviceRow } from './DeviceRow';
 import { SearchBar } from './SearchBar';
 import { ModelSelector } from './ModelSelector';
@@ -59,6 +66,7 @@ import { ComputerSessionPanel } from './ComputerSessionPanel';
 import { ComputerSetupPanel } from './ComputerSetupPanel';
 import { useComputerUse } from '@/providers/ComputerUseProvider';
 import { shouldShowComputerSetup, type ComputerSession } from '../../../shared/computer-use';
+import { getResponseTiming } from '@/lib/response-timing';
 const MATRIX_GLYPHS = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890@#$%^&*+-/~{[|`]}<>01';
 
 export type ThreadMode = 'chat' | 'computer';
@@ -94,7 +102,7 @@ export const Thread: FC<{
       {mode === 'chat' ? (
         <ThreadPrimitive.Viewport ref={viewportRef} className="relative min-h-0 flex-1 overflow-y-auto">
           <ThreadPrimitive.Empty>
-            <MatrixRainBackground />
+            <EmptyThreadBackground />
           </ThreadPrimitive.Empty>
           <div className="relative z-10 mx-auto flex min-h-full w-full max-w-5xl flex-col px-6 pt-8">
             <ThreadWelcome />
@@ -250,20 +258,14 @@ const GuidanceComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
   };
 
   return (
-    <div className="rounded-[1.7rem] border border-border/70 bg-card/78 px-3 py-3 shadow-[inset_0_0_0_1px_rgba(197,194,245,0.08),0_12px_40px_rgba(5,4,15,0.18)]">
+    <div className="rounded-[1.7rem] border border-border/70 bg-card/78 px-3 py-3 app-composer-shadow">
       <div className="flex items-center gap-2">
-        <textarea
+        <RichChatInput
           value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey && !e.altKey) {
-              e.preventDefault();
-              handleSend();
-            }
-          }}
+          onChange={setText}
+          onSubmit={handleSend}
           placeholder="Guide the session... (Enter to send)"
-          rows={1}
-          className="min-h-[36px] max-h-[120px] flex-1 resize-none bg-transparent px-1 py-1 text-sm outline-none placeholder:text-muted-foreground/50"
+          className="min-h-[36px] max-h-[180px] flex-1 bg-transparent px-1 py-1 text-sm outline-none"
         />
         <button
           type="button"
@@ -279,7 +281,9 @@ const GuidanceComposer: FC<{ sessionId: string }> = ({ sessionId }) => {
 };
 
 const ThreadWelcome: FC = () => {
+  const { config } = useConfig();
   const threadRuntime = useThreadRuntime();
+  const gradientText = getUiFlag(config, 'gradientText', __BRAND_THEME_GRADIENT_TEXT === 'true');
 
   const handleSuggestion = useCallback((text: string) => {
     threadRuntime.append({
@@ -293,7 +297,7 @@ const ThreadWelcome: FC = () => {
       <div className="flex flex-1 items-center justify-center py-24">
         <div className="relative z-10 flex select-none flex-col items-center justify-center">
           <div className="mb-3 inline-flex items-center gap-0.5 text-4xl font-semibold">
-            <span className="app-gradient-text app-wordmark">{__BRAND_WORDMARK}</span>
+            <span className={`app-wordmark ${gradientText ? 'app-gradient-text' : 'app-gradient-text-off'}`}>{__BRAND_WORDMARK}</span>
             <CpuIcon className="h-9 w-9 text-primary/80" />
           </div>
           <p className="max-w-xl text-center text-sm text-muted-foreground">
@@ -317,6 +321,41 @@ const ThreadWelcome: FC = () => {
   );
 };
 
+/** Helper to read boolean/string ui flags from the untyped config */
+function getUiFlag(config: Record<string, unknown> | null, key: string, fallback: boolean): boolean {
+  const ui = config?.ui as Record<string, unknown> | undefined;
+  if (ui && key in ui) return Boolean(ui[key]);
+  return fallback;
+}
+
+function getUiString(config: Record<string, unknown> | null, key: string, fallback: string): string {
+  const ui = config?.ui as Record<string, unknown> | undefined;
+  if (ui && key in ui && typeof ui[key] === 'string') return ui[key] as string;
+  return fallback;
+}
+
+/** Config-gated background for the empty thread state */
+const EmptyThreadBackground: FC = () => {
+  const { config } = useConfig();
+  const background = getUiString(config, 'background', __BRAND_THEME_BACKGROUND || 'matrix-rain');
+
+  if (background === 'none') return null;
+  if (background === 'gradient') return <GradientBackground />;
+  return <MatrixRainBackground />;
+};
+
+/** Subtle radial gradient alternative to the matrix rain */
+const GradientBackground: FC = () => (
+  <div
+    aria-hidden="true"
+    className="pointer-events-none absolute inset-0 overflow-hidden"
+  >
+    <div className="absolute inset-0" style={{ background: 'radial-gradient(ellipse 70% 50% at 50% 30%, var(--app-shell-glow), transparent)' }} />
+    <div className="absolute inset-0" style={{ background: 'radial-gradient(circle at 30% 70%, var(--brand-accent-subtle), transparent 50%)' }} />
+    <div className="absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-background via-background/75 to-transparent" />
+  </div>
+);
+
 const MatrixRainBackground: FC = () => (
   <div
     aria-hidden="true"
@@ -327,7 +366,7 @@ const MatrixRainBackground: FC = () => (
     <div className="absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-background via-background/75 to-transparent" />
     <div className="absolute inset-y-0 left-0 w-28 bg-gradient-to-r from-background via-background/85 to-transparent" />
     <div className="absolute inset-y-0 right-0 w-28 bg-gradient-to-l from-background via-background/85 to-transparent" />
-    <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(160,154,232,0.08),transparent_58%)]" />
+    <div className="absolute inset-0" style={{ background: 'radial-gradient(circle at center, var(--brand-accent-subtle), transparent 58%)' }} />
   </div>
 );
 
@@ -626,7 +665,7 @@ const ToolGroupWrapper: FC<PropsWithChildren> = ({ children }) => (
 
 const UserTextPart: FC<{ text: string }> = ({ text }) => {
   if (text.startsWith('\n\n--- File:') || text.startsWith('\n[Attached file:')) return null;
-  return <span className="whitespace-pre-wrap text-sm leading-6 text-foreground">{text}</span>;
+  return <UserCodeMarkdown text={text} className="text-sm leading-6 text-foreground" />;
 };
 
 const userContentComponents = {
@@ -672,6 +711,7 @@ const assistantContentComponents = {
 
 const AssistantMessage: FC = () => {
   const message = useMessage();
+  const { activeRunStartedAt } = useAssistantResponseTiming();
   const isRunning = message.status?.type === 'running';
   const content = message.content ?? [];
   const hasContent = content.some((p: { type: string; text?: string }) =>
@@ -729,11 +769,27 @@ const AssistantMessage: FC = () => {
   const pipelineEnrichments = enrichmentsPart?.enrichments ?? null;
 
   const tokenUsage = (message as { tokenUsage?: TokenUsageData }).tokenUsage ?? null;
+  const responseTiming = getResponseTiming(message);
+  const badgeStartedAt = responseTiming?.startedAt ?? (isRunning ? activeRunStartedAt ?? undefined : undefined);
+  const badgeFinishedAt = responseTiming?.finishedAt;
+  const showResponseBadge = Boolean(badgeStartedAt);
 
   return (
     <MessagePrimitive.Root className="group mb-8 flex justify-start">
       <div className="w-full max-w-4xl">
-        <div className="aui-assistant-content rounded-[1.5rem] border border-border/45 bg-card/[0.22] px-4 py-3 text-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] backdrop-blur-[2px]">
+        <div className={`aui-assistant-content relative rounded-[1.5rem] border border-border/45 bg-card/[0.22] px-4 py-3 text-foreground shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] backdrop-blur-[2px] ${showResponseBadge ? 'pr-20' : ''}`}>
+          {showResponseBadge && (
+            <div
+              className="aui-assistant-badge pointer-events-none absolute z-10 flex"
+              style={{ top: '10px', right: '10px' }}
+            >
+              <ElapsedBadge
+                startedAt={badgeStartedAt}
+                finishedAt={badgeFinishedAt}
+                isRunning={isRunning}
+              />
+            </div>
+          )}
           {isEmpty ? (
             <div className="flex items-center gap-2 py-0.5 text-muted-foreground">
               <BanIcon className="h-3.5 w-3.5" />
@@ -1220,10 +1276,13 @@ const Composer: FC<{
   fallbackEnabled: boolean;
   onToggleFallback: (value: boolean) => void;
 }> = ({ mode, selectedModelKey, onSelectModel, reasoningEffort, onChangeReasoningEffort, selectedProfileKey, onSelectProfile, fallbackEnabled, onToggleFallback }) => {
+  const composerRuntime = useComposerRuntime();
   const { attachments, addAttachments, removeAttachment } = useAttachments();
+  const { currentWorkingDirectory, setCurrentWorkingDirectory } = useCurrentWorkingDirectory();
   const { config } = useConfig();
   const { sessionsByConversation } = useComputerUse();
   const activeConversationId = useActiveConversationId();
+  const [composerText, setComposerText] = useState(() => composerRuntime.getState().text ?? '');
   const dictationEnabled = (config as Record<string, unknown> | null)?.audio
     ? ((config as Record<string, unknown>).audio as { dictation?: { enabled?: boolean } })?.dictation?.enabled ?? true
     : true;
@@ -1231,17 +1290,45 @@ const Composer: FC<{
   const activeComputerSession = getActiveComputerSession(activeConversationId, sessionsByConversation);
   const showComputerSetup = shouldShowComputerSetup(activeComputerSession);
 
-  const handleAttach = async () => {
+  useEffect(() => {
+    const unsubscribe = composerRuntime.subscribe(() => {
+      setComposerText(composerRuntime.getState().text ?? '');
+    });
+    return unsubscribe;
+  }, [composerRuntime]);
+
+  const handleAttachFiles = async (filters?: Array<{ name: string; extensions: string[] }>) => {
     try {
-      const result = await app.dialog.openFile() as { canceled: boolean; files?: Array<{ name: string; mime: string; isImage: boolean; size: number; dataUrl: string; text?: string }> };
+      const result = await app.dialog.openFile({ filters }) as { canceled: boolean; files?: Array<{ name: string; mime: string; isImage: boolean; size: number; dataUrl: string; text?: string }> };
       if (!result.canceled && result.files) addAttachments(result.files);
     } catch (err) { console.error('Attach failed:', err); }
   };
 
+  const handleAttachDirectory = async () => {
+    try {
+      const result = await app.dialog.openDirectory();
+      if (!result.canceled && result.directoryPath) {
+        await setCurrentWorkingDirectory(result.directoryPath);
+      }
+    } catch (err) {
+      console.error('Attach directory failed:', err);
+    }
+  };
+
+  const handleSend = useCallback(() => {
+    if (!composerText.trim() && attachments.length === 0) return;
+    composerRuntime.send();
+  }, [attachments.length, composerRuntime, composerText]);
+
+  const canSend = composerText.trim().length > 0 || attachments.length > 0;
+  const hasFileAttachments = attachments.length > 0;
+  const cwdName = currentWorkingDirectory?.split('/').pop() ?? currentWorkingDirectory;
+  const menuItemClassName = 'flex cursor-default items-center gap-2 rounded-lg px-3 py-2 text-sm text-foreground outline-none transition-colors data-[highlighted]:bg-muted/70';
+
   return (
     <div className="relative z-20 border-t border-border/70 bg-background/88 px-6 pb-6 pt-4 backdrop-blur-md">
       <div className="mx-auto w-full max-w-5xl">
-        {mode === 'chat' && attachments.length > 0 && (
+        {mode === 'chat' && hasFileAttachments && (
           <div className="mb-3 flex flex-wrap gap-2">
             {attachments.map((file, i) => (
               <div key={`${file.name}-${i}`} className="group/att flex items-center gap-1.5 rounded-2xl border border-border/70 bg-card/65 px-2.5 py-2 text-xs">
@@ -1272,7 +1359,7 @@ const Composer: FC<{
             <GuidanceComposer sessionId={activeComputerSession.id} />
           ) : null
         ) : (
-          <ComposerPrimitive.Root className="flex flex-col gap-0 rounded-[1.7rem] border border-border/70 bg-card/78 px-3 py-3 shadow-[inset_0_0_0_1px_rgba(197,194,245,0.08),0_12px_40px_rgba(5,4,15,0.18)]">
+          <ComposerPrimitive.Root className="flex flex-col gap-0 rounded-[1.7rem] border border-border/70 bg-card/78 px-3 py-3 app-composer-shadow">
             {mode === 'computer' ? (
               <ComputerSetupPanel
                 conversationId={activeConversationId}
@@ -1289,6 +1376,31 @@ const Composer: FC<{
               />
             ) : (
               <>
+                {currentWorkingDirectory && (
+                  <div className="mb-2 flex items-center justify-between gap-2 rounded-xl border border-border/60 bg-muted/25 px-3 py-2 text-[11px]">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <FolderOpenIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      <span className="shrink-0 font-medium text-foreground/90">Working Dir</span>
+                      <span className="shrink-0 text-muted-foreground">/</span>
+                      <span className="max-w-[360px] truncate text-muted-foreground" title={currentWorkingDirectory}>
+                        {currentWorkingDirectory}
+                      </span>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <span className="max-w-[120px] truncate text-[10px] text-foreground/80" title={cwdName ?? undefined}>
+                        {cwdName}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => { void setCurrentWorkingDirectory(null); }}
+                        className="rounded-md p-1 transition-colors hover:bg-destructive/10"
+                        title="Clear current working directory"
+                      >
+                        <XIcon className="h-3 w-3 text-muted-foreground" />
+                      </button>
+                    </div>
+                  </div>
+                )}
                 <ComposerInput
                   placeholder={__BRAND_COMPOSER_PLACEHOLDER}
                   className="min-h-[48px] max-h-[220px] w-full overflow-y-auto px-1 py-0.5 text-[15px]"
@@ -1296,9 +1408,42 @@ const Composer: FC<{
                 />
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex min-w-0 items-center gap-2">
-                    <button type="button" onClick={handleAttach} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-border/70 bg-card/70 transition-colors hover:bg-muted/50" title="Attach file">
-                      <PaperclipIcon className="h-4 w-4 text-muted-foreground" />
-                    </button>
+                    <DropdownMenu.Root>
+                      <DropdownMenu.Trigger asChild>
+                        <button type="button" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-border/70 bg-card/70 transition-colors hover:bg-muted/50" title="Add attachment">
+                          <PlusIcon className="h-4 w-4 text-muted-foreground" />
+                        </button>
+                      </DropdownMenu.Trigger>
+                      <DropdownMenu.Portal>
+                        <DropdownMenu.Content
+                          align="start"
+                          sideOffset={8}
+                          className="z-50 min-w-[240px] rounded-2xl border border-border/70 bg-popover/95 p-1.5 text-popover-foreground shadow-xl backdrop-blur-md"
+                        >
+                          <DropdownMenu.Item className={menuItemClassName} onSelect={() => { void handleAttachDirectory(); }}>
+                            <FolderOpenIcon className="h-4 w-4 text-muted-foreground" />
+                            <span>Working Directory</span>
+                          </DropdownMenu.Item>
+                          <DropdownMenu.Item className={menuItemClassName} onSelect={() => { void handleAttachFiles([{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'] }]); }}>
+                            <ImageIcon className="h-4 w-4 text-muted-foreground" />
+                            <span>Image</span>
+                          </DropdownMenu.Item>
+                          <DropdownMenu.Item className={menuItemClassName} onSelect={() => { void handleAttachFiles([{ name: 'PDF', extensions: ['pdf'] }]); }}>
+                            <FileIcon className="h-4 w-4 text-muted-foreground" />
+                            <span>PDF</span>
+                          </DropdownMenu.Item>
+                          <DropdownMenu.Item className={menuItemClassName} onSelect={() => { void handleAttachFiles([{ name: 'Documents', extensions: ['txt', 'md', 'json', 'csv', 'html', 'htm', 'js', 'jsx', 'ts', 'tsx', 'css', 'scss', 'py', 'rb', 'go', 'rs', 'java', 'c', 'cpp', 'h', 'hpp', 'sh', 'yaml', 'yml', 'toml', 'xml'] }]); }}>
+                            <FileTextIcon className="h-4 w-4 text-muted-foreground" />
+                            <span>Text / Document</span>
+                          </DropdownMenu.Item>
+                          <DropdownMenu.Separator className="my-1 h-px bg-border/60" />
+                          <DropdownMenu.Item className={menuItemClassName} onSelect={() => { void handleAttachFiles(); }}>
+                            <FileIcon className="h-4 w-4 text-muted-foreground" />
+                            <span>Any File</span>
+                          </DropdownMenu.Item>
+                        </DropdownMenu.Content>
+                      </DropdownMenu.Portal>
+                    </DropdownMenu.Root>
                     {dictationEnabled && <DictationButton />}
                     <CallButton />
                     <ProfileSelector
@@ -1321,11 +1466,14 @@ const Composer: FC<{
                     <KnowledgeComposerPopover />
                   </div>
                   <ThreadPrimitive.If running={false}>
-                    <ComposerPrimitive.Send asChild>
-                      <button type="button" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40">
+                    <button
+                      type="button"
+                      onClick={handleSend}
+                      disabled={!canSend}
+                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
+                    >
                         <SendHorizontalIcon className="h-4 w-4" />
-                      </button>
-                    </ComposerPrimitive.Send>
+                    </button>
                   </ThreadPrimitive.If>
                   <ThreadPrimitive.If running>
                     <StopButton />

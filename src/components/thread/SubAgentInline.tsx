@@ -16,6 +16,8 @@ import {
 import { useSubAgents, type SubAgentThreadState } from '@/providers/RuntimeProvider';
 import { MarkdownText } from './MarkdownText';
 import { ToolCallDisplay } from './ToolGroup';
+import { RichChatInput } from './RichChatInput';
+import { UserCodeMarkdown } from './UserCodeMarkdown';
 
 type SubAgentInlineProps = {
   toolCallId: string;
@@ -183,13 +185,12 @@ export const SubAgentInline: FC<SubAgentInlineProps> = ({ toolCallId, args, resu
           {(isRunning || thread?.status === 'awaiting-input') && subAgentId && (
             <div className="border-t px-3 py-2">
               <div className="flex items-center gap-1.5 rounded-lg border bg-background px-2 py-1.5">
-                <input
-                  type="text"
+                <RichChatInput
                   value={messageInput}
-                  onChange={(e) => setMessageInput(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }}
+                  onChange={setMessageInput}
+                  onSubmit={handleSendMessage}
                   placeholder="Message sub-agent..."
-                  className="flex-1 text-xs bg-transparent outline-none"
+                  className="min-h-[28px] max-h-[160px] flex-1 bg-transparent text-xs outline-none"
                 />
                 <button
                   type="button"
@@ -257,8 +258,8 @@ const MiniChatBubble: FC<{ role: string; content: ContentPart[] }> = ({ role, co
   } else if (source === 'task') {
     label = 'Task (from parent)';
     Icon = MonitorIcon;
-    iconColor = 'text-purple-400';
-    bubbleBg = 'bg-purple-500/10 border border-purple-500/20';
+    iconColor = 'text-primary';
+    bubbleBg = 'bg-[var(--brand-accent-subtle)] border border-[var(--brand-accent-border)]';
     align = 'justify-start';
   } else if (source === 'user') {
     label = 'You';
@@ -288,7 +289,13 @@ const MiniChatBubble: FC<{ role: string; content: ContentPart[] }> = ({ role, co
         <div className="mt-0.5 space-y-1">
           {content.map((part, i) => {
             if (part.type === 'text' && part.text?.trim()) {
-              return <div key={i} className="text-xs"><MarkdownText text={part.text} /></div>;
+              return (
+                <div key={i} className="text-xs">
+                  {source === 'user'
+                    ? <UserCodeMarkdown text={part.text} className="text-xs" />
+                    : <MarkdownText text={part.text} />}
+                </div>
+              );
             }
             if (part.type === 'tool-call') {
               return (

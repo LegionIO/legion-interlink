@@ -1,316 +1,143 @@
-import { useRef, useState, useEffect, useCallback, type FC, type KeyboardEvent, type ClipboardEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type FC } from 'react';
 import { useComposerRuntime } from '@assistant-ui/react';
+import { RichChatInput } from './RichChatInput';
 import { useAttachments } from '@/providers/AttachmentContext';
+import { usePromptHistory } from '@/providers/RuntimeProvider';
 
-/**
- * Custom composer input using contentEditable that renders the product name
- * with the gradient animation. Replaces ComposerPrimitive.Input but
- * uses the same composer runtime for state management.
- */
 export const ComposerInput: FC<{ placeholder?: string; className?: string; autoFocus?: boolean }> = ({
   placeholder = __BRAND_COMPOSER_PLACEHOLDER,
   className = '',
   autoFocus,
 }) => {
   const composerRuntime = useComposerRuntime();
-  const { addAttachments } = useAttachments();
-  const editorRef = useRef<HTMLDivElement>(null);
-  const isComposingRef = useRef(false);
-  const lastTextRef = useRef('');
-  const [showPlaceholder, setShowPlaceholder] = useState(true);
+  const { attachments, addAttachments } = useAttachments();
+  const { conversationId, prompts: promptHistory } = usePromptHistory();
+  const [text, setText] = useState(() => composerRuntime.getState().text ?? '');
+  const historyIndexRef = useRef(-1);
+  const draftBeforeHistoryRef = useRef('');
+  const historyConversationRef = useRef<string | null>(conversationId);
 
-  const shouldShowPlaceholder = (text: string): boolean => text.trim().length === 0;
-  const getNodePlainText = (root: Node | null): string => {
-    if (!root) return '';
-
-    let text = '';
-    const walk = (node: Node) => {
-      if (node.nodeType === Node.TEXT_NODE) {
-        text += node.textContent ?? '';
-        return;
-      }
-
-      if (node.nodeType !== Node.ELEMENT_NODE && node.nodeType !== Node.DOCUMENT_FRAGMENT_NODE) {
-        return;
-      }
-
-      if (node.nodeType === Node.ELEMENT_NODE) {
-        const tag = (node as HTMLElement).tagName;
-        if (tag === 'BR') {
-          text += '\n';
-          return;
-        }
-        if ((tag === 'DIV' || tag === 'P') && text.length > 0 && !text.endsWith('\n')) {
-          text += '\n';
-        }
-      }
-
-      for (const child of Array.from(node.childNodes)) {
-        walk(child);
-      }
-    };
-
-    walk(root);
-    return text;
-  };
-
-  // --- Cursor save/restore ---
-  const saveCursorOffset = (): number => {
-    const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0 || !editorRef.current) return 0;
-    const range = sel.getRangeAt(0);
-    if (!editorRef.current.contains(range.startContainer)) return 0;
-
-    const prefixRange = document.createRange();
-    prefixRange.selectNodeContents(editorRef.current);
-    prefixRange.setEnd(range.startContainer, range.startOffset);
-    return getNodePlainText(prefixRange.cloneContents()).length;
-  };
-
-  const restoreCursorOffset = (charOffset: number) => {
-    const el = editorRef.current;
-    if (!el) return;
-    const sel = window.getSelection();
-    if (!sel) return;
-
-    let remaining = charOffset;
-    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, {
-      acceptNode: (node) => {
-        if (node.nodeType === Node.TEXT_NODE) return NodeFilter.FILTER_ACCEPT;
-        if (node.nodeType === Node.ELEMENT_NODE && (node as HTMLElement).tagName === 'BR') {
-          return NodeFilter.FILTER_ACCEPT;
-        }
-        return NodeFilter.FILTER_SKIP;
-      },
-    });
-    let node: Node | null;
-    while ((node = walker.nextNode())) {
-      if (node.nodeType === Node.TEXT_NODE) {
-        const len = node.textContent?.length ?? 0;
-        if (remaining <= len) {
-          const range = document.createRange();
-          range.setStart(node, remaining);
-          range.collapse(true);
-          sel.removeAllRanges();
-          sel.addRange(range);
-          return;
-        }
-        remaining -= len;
-        continue;
-      }
-
-      const parent = node.parentNode;
-      if (!parent) continue;
-      const index = Array.prototype.indexOf.call(parent.childNodes, node) as number;
-      if (remaining === 0) {
-        const range = document.createRange();
-        range.setStart(parent, index);
-        range.collapse(true);
-        sel.removeAllRanges();
-        sel.addRange(range);
-        return;
-      }
-      remaining -= 1;
-      if (remaining === 0) {
-        const range = document.createRange();
-        range.setStart(parent, index + 1);
-        range.collapse(true);
-        sel.removeAllRanges();
-        sel.addRange(range);
-        return;
-      }
-    }
-    // Fallback: end
-    const range = document.createRange();
-    range.selectNodeContents(el);
-    range.collapse(false);
-    sel.removeAllRanges();
-    sel.addRange(range);
-  };
-
-  // --- Extract plain text ---
-  const getPlainText = (): string => {
-    return getNodePlainText(editorRef.current);
-  };
-
-  // --- Render highlighted HTML ---
-  const toHighlightedHTML = (text: string): string => {
-    if (!text) return '';
-    return text.split('\n').join('<br>');
-  };
-
-  const rerenderContent = useCallback((text: string) => {
-    const el = editorRef.current;
-    if (!el) return;
-    const cursor = saveCursorOffset();
-    const html = toHighlightedHTML(text) || '<br>';
-    if (el.innerHTML !== html) {
-      el.innerHTML = html;
-    }
-    restoreCursorOffset(cursor);
+  const resetHistoryNavigation = useCallback((draft: string) => {
+    historyIndexRef.current = -1;
+    draftBeforeHistoryRef.current = draft;
   }, []);
 
-  // --- Sync from composer runtime (e.g. when text is cleared after send) ---
-  useEffect(() => {
-    const unsub = composerRuntime.subscribe(() => {
-      const state = composerRuntime.getState();
-      const runtimeText = state.text ?? '';
-      if (runtimeText !== lastTextRef.current) {
-        lastTextRef.current = runtimeText;
-        const el = editorRef.current;
-        setShowPlaceholder(shouldShowPlaceholder(runtimeText));
-        if (el && document.activeElement !== el) {
-          el.innerHTML = toHighlightedHTML(runtimeText) || '<br>';
-        } else if (el && runtimeText === '') {
-          el.innerHTML = '<br>';
-        }
+  const setComposerText = useCallback((nextText: string) => {
+    setText(nextText);
+    composerRuntime.setText(nextText);
+  }, [composerRuntime]);
+
+  const navigatePromptHistory = useCallback((direction: 'older' | 'newer'): boolean => {
+    if (direction === 'older') {
+      if (promptHistory.length === 0) return false;
+
+      if (historyIndexRef.current === -1) {
+        draftBeforeHistoryRef.current = text;
       }
+
+      const nextIndex = Math.min(historyIndexRef.current + 1, promptHistory.length - 1);
+      historyIndexRef.current = nextIndex;
+      setComposerText(promptHistory[nextIndex] ?? '');
+      return true;
+    }
+
+    if (historyIndexRef.current === -1) return false;
+
+    const nextIndex = historyIndexRef.current - 1;
+    if (nextIndex < 0) {
+      historyIndexRef.current = -1;
+      setComposerText(draftBeforeHistoryRef.current);
+      return true;
+    }
+
+    historyIndexRef.current = nextIndex;
+    setComposerText(promptHistory[nextIndex] ?? '');
+    return true;
+  }, [promptHistory, setComposerText, text]);
+
+  useEffect(() => {
+    if (historyConversationRef.current === conversationId) return;
+    historyConversationRef.current = conversationId;
+    resetHistoryNavigation(text);
+  }, [conversationId, resetHistoryNavigation, text]);
+
+  useEffect(() => {
+    const unsubscribe = composerRuntime.subscribe(() => {
+      const runtimeText = composerRuntime.getState().text ?? '';
+      setText((currentText) => {
+        if (currentText === runtimeText) return currentText;
+        if (runtimeText === '') resetHistoryNavigation('');
+        return runtimeText;
+      });
     });
-    return unsub;
-  }, [composerRuntime, rerenderContent]);
+    return unsubscribe;
+  }, [composerRuntime, resetHistoryNavigation]);
 
-  // --- Initial render ---
-  useEffect(() => {
-    const state = composerRuntime.getState();
-    const text = state.text ?? '';
-    lastTextRef.current = text;
-    setShowPlaceholder(shouldShowPlaceholder(text));
-    if (editorRef.current) {
-      editorRef.current.innerHTML = toHighlightedHTML(text) || '<br>';
+  const handleChange = useCallback((nextText: string) => {
+    if (historyIndexRef.current !== -1) {
+      resetHistoryNavigation(nextText);
     }
-    if (autoFocus) editorRef.current?.focus();
-  }, []);
+    setText(nextText);
+    composerRuntime.setText(nextText);
+  }, [composerRuntime, resetHistoryNavigation]);
 
-  // --- Input handler ---
-  const handleInput = () => {
-    if (isComposingRef.current) return;
-    const text = getPlainText();
-    lastTextRef.current = text;
-    const nowEmpty = text.length === 0;
-    setShowPlaceholder(shouldShowPlaceholder(text));
-    composerRuntime.setText(text);
-    if (nowEmpty) {
-      // Preserve a clickable empty line shell so modified Enter works from the start.
-      const el = editorRef.current;
-      if (el) {
-        el.innerHTML = '<br>';
-        const range = document.createRange();
-        range.setStart(el, 0);
-        range.collapse(true);
-        const sel = window.getSelection();
-        if (sel) { sel.removeAllRanges(); sel.addRange(range); }
-      }
-    } else {
-      requestAnimationFrame(() => rerenderContent(text));
-    }
-  };
+  const handleSubmit = useCallback(() => {
+    if (!text.trim() && attachments.length === 0) return;
+    composerRuntime.send();
+    setText('');
+    composerRuntime.setText('');
+    resetHistoryNavigation('');
+  }, [attachments.length, composerRuntime, resetHistoryNavigation, text]);
 
-  const insertLineBreak = () => {
-    const el = editorRef.current;
-    if (!el) return;
-
-    el.focus();
-    document.execCommand('insertLineBreak');
-    handleInput();
-  };
-
-  // --- Keyboard ---
-  const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.key === 'Enter' && (e.shiftKey || e.altKey) && !e.ctrlKey && !e.metaKey) {
-      e.preventDefault();
-      insertLineBreak();
-      return;
-    }
-
-    // Enter sends; Shift+Enter and Option+Enter insert a newline.
-    if (e.key === 'Enter' && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
-      e.preventDefault();
-      const text = getPlainText().trim();
-      if (text) {
-        composerRuntime.send();
-        if (editorRef.current) editorRef.current.innerHTML = '<br>';
-        lastTextRef.current = '';
-        setShowPlaceholder(true);
-      }
-      return;
-    }
-    // Escape to cancel
-    if (e.key === 'Escape') {
-      composerRuntime.cancel();
-      return;
-    }
-    // Tab for spaces
-    if (e.key === 'Tab') {
-      e.preventDefault();
-      document.execCommand('insertText', false, '  ');
-    }
-  };
-
-  // --- Paste: handle images as attachments, text as plain text ---
-  const handlePaste = (e: ClipboardEvent<HTMLDivElement>) => {
-    const items = Array.from(e.clipboardData.items);
+  const handlePaste = useCallback((event: ClipboardEvent<HTMLElement>) => {
+    const items = Array.from(event.clipboardData.items);
     const imageItems = items.filter((item) => item.type.startsWith('image/'));
 
-    if (imageItems.length > 0) {
-      e.preventDefault();
-      for (const item of imageItems) {
-        const file = item.getAsFile();
-        if (!file) continue;
-        const reader = new FileReader();
-        reader.onload = () => {
-          addAttachments([{
-            name: file.name || `pasted-image-${Date.now()}.${file.type.split('/')[1] || 'png'}`,
-            mime: file.type,
-            isImage: true,
-            size: file.size,
-            dataUrl: reader.result as string,
-          }]);
-        };
-        reader.readAsDataURL(file);
-      }
-      // Also paste any text that came with it
-      const text = e.clipboardData.getData('text/plain');
-      if (text) document.execCommand('insertText', false, text);
-      return;
+    if (imageItems.length === 0) return false;
+
+    event.preventDefault();
+    for (const item of imageItems) {
+      const file = item.getAsFile();
+      if (!file) continue;
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        addAttachments([{
+          name: file.name || `pasted-image-${Date.now()}.${file.type.split('/')[1] || 'png'}`,
+          mime: file.type,
+          isImage: true,
+          size: file.size,
+          dataUrl: reader.result as string,
+        }]);
+      };
+      reader.readAsDataURL(file);
     }
 
-    // Plain text paste
-    e.preventDefault();
-    const text = e.clipboardData.getData('text/plain');
-    document.execCommand('insertText', false, text);
-  };
-
-  const handleFocus = () => {
-    const el = editorRef.current;
-    if (!el) return;
-    // When empty, place cursor at position 0
-    if (getPlainText().length === 0) {
-      const range = document.createRange();
-      range.setStart(el, 0);
-      range.collapse(true);
-      const sel = window.getSelection();
-      if (sel) {
-        sel.removeAllRanges();
-        sel.addRange(range);
-      }
+    const pastedText = event.clipboardData.getData('text/plain');
+    if (pastedText) {
+      document.execCommand('insertText', false, pastedText);
     }
-  };
+
+    return true;
+  }, [addAttachments]);
 
   return (
-    <div
-      ref={editorRef}
-      contentEditable
-      suppressContentEditableWarning
-      onInput={handleInput}
-      onKeyDown={handleKeyDown}
+    <RichChatInput
+      value={text}
+      onChange={handleChange}
+      onSubmit={handleSubmit}
+      onCancel={() => composerRuntime.cancel()}
+      onArrowNavigate={(direction, rawOffset) => {
+        if (direction === 'older') {
+          const shouldNavigate = historyIndexRef.current !== -1 || !text.includes('\n') || rawOffset === 0;
+          return shouldNavigate ? navigatePromptHistory('older') : false;
+        }
+        return navigatePromptHistory('newer');
+      }}
       onPaste={handlePaste}
-      onFocus={handleFocus}
-      onCompositionStart={() => { isComposingRef.current = true; }}
-      onCompositionEnd={() => { isComposingRef.current = false; handleInput(); }}
-      className={`outline-none whitespace-pre-wrap break-words app-ce-placeholder ${className}`}
-      role="textbox"
-      aria-multiline
-      data-placeholder={showPlaceholder ? placeholder : undefined}
+      placeholder={placeholder}
+      className={className}
+      autoFocus={autoFocus}
     />
   );
 };
