@@ -4,6 +4,7 @@ import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
 import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import type { LanguageModel } from 'ai';
 import type { LLMModelConfig } from './model-catalog.js';
+import { withBrandUserAgent } from '../utils/user-agent.js';
 
 function stripTrailingSlashes(value: string): string {
   let end = value.length;
@@ -39,9 +40,12 @@ function normalizeOpenAIBaseUrl(endpoint?: string): string | undefined {
 
 function createTemperatureOmissionFetch(): typeof fetch {
   return async (input, init) => {
-    const headers = new Headers(init?.headers);
+    const headers = new Headers(withBrandUserAgent(init?.headers));
     if (headers.get('x-skynet-omit-temperature') !== '1') {
-      return fetch(input, init);
+      return fetch(input, {
+        ...init,
+        headers,
+      });
     }
 
     headers.delete('x-skynet-omit-temperature');
@@ -116,7 +120,7 @@ async function createBedrockModel(modelConfig: LLMModelConfig) {
     ...(hasExplicitKeys ? { secretAccessKey: modelConfig.secretAccessKey! } : {}),
     ...(modelConfig.sessionToken ? { sessionToken: modelConfig.sessionToken } : {}),
     ...(credentialProviderFn ? { credentialProvider: credentialProviderFn } : {}),
-    ...(Object.keys(configuredHeaders).length > 0 ? { headers: configuredHeaders } : {}),
+    ...(Object.keys(configuredHeaders).length > 0 ? { headers: withBrandUserAgent(configuredHeaders) } : { headers: withBrandUserAgent() }),
   });
 
   return bedrock(modelConfig.modelName);
@@ -135,7 +139,7 @@ export async function createLanguageModelFromConfig(modelConfig: LLMModelConfig)
     const anthropic = createAnthropic({
       baseURL: stripTrailingSlashes(modelConfig.endpoint),
       ...(modelConfig.apiKey ? { apiKey: modelConfig.apiKey } : {}),
-      ...(modelConfig.extraHeaders ? { headers: modelConfig.extraHeaders } : {}),
+      headers: withBrandUserAgent(modelConfig.extraHeaders ?? {}),
       fetch: createTemperatureOmissionFetch(),
     });
     return anthropic(modelConfig.modelName);
@@ -149,10 +153,10 @@ export async function createLanguageModelFromConfig(modelConfig: LLMModelConfig)
   const openai = createOpenAI({
     ...(normalizedBaseUrl ? { baseURL: normalizedBaseUrl } : {}),
     apiKey: modelConfig.apiKey || 'dummy',
-    headers: {
+    headers: withBrandUserAgent({
       ...(modelConfig.apiVersion ? { 'api-version': modelConfig.apiVersion } : {}),
       ...(modelConfig.extraHeaders ?? {}),
-    },
+    }),
   });
 
   const modelId = modelConfig.deploymentName || modelConfig.modelName;

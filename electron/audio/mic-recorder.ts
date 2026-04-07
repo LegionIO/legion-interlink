@@ -9,6 +9,7 @@
  */
 
 import { BrowserWindow, type IpcMain } from 'electron';
+import { applyBrandUserAgent } from '../utils/user-agent.js';
 import { writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -314,6 +315,7 @@ async function ensureRecorderWindow(): Promise<BrowserWindow> {
       webSecurity: false, // Allow getUserMedia from file:// URLs
     },
   });
+  applyBrandUserAgent(recorderWindow.webContents);
 
   recorderWindow.webContents.session.setPermissionRequestHandler((_wc, permission, callback) => {
     callback(['media', 'microphone', 'audioCapture'].includes(permission));

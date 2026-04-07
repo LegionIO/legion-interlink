@@ -27,6 +27,7 @@ import { PluginBannerSlot } from '@/components/plugins/PluginBannerSlot';
 import { PluginModalHost } from '@/components/plugins/PluginModalHost';
 import { ComputerUseProvider, useComputerUse } from '@/providers/ComputerUseProvider';
 import { OverlayShell } from '@/components/overlay/OverlayShell';
+import { useThemeInjector } from '@/hooks/useThemeInjector';
 import { BellIcon, BookOpenIcon, BotIcon, CpuIcon, DownloadIcon, GaugeIcon, GitBranchIcon, PuzzleIcon, SettingsIcon } from 'lucide-react';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { SidebarDock, type DockItem } from '@/components/SidebarDock';
@@ -53,6 +54,9 @@ export default function App() {
 }
 
 function AppRoot() {
+  // Apply brand hue CSS variable from config / branding defaults
+  useThemeInjector();
+
   const search = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
   const isOperatorWindow = search?.get('operator') === '1';
   const isOverlayWindow = search?.get('overlay') === '1';
@@ -240,7 +244,7 @@ const ComputerSetupShell: FC<{ preferredConversationId?: string | null }> = ({ p
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-          <div className="rounded-[1.7rem] border border-border/70 bg-card/78 px-3 py-3 shadow-[inset_0_0_0_1px_rgba(197,194,245,0.08),0_12px_40px_rgba(5,4,15,0.18)]">
+          <div className="rounded-[1.7rem] border border-border/70 bg-card/78 px-3 py-3 app-composer-shadow">
             {showComputerSetup ? (
               <ComputerSetupPanel
                 conversationId={conversationId}
@@ -516,6 +520,7 @@ function AppShell() {
       messageCount: 0, userMessageCount: 0,
       runStatus: 'idle', hasUnread: false, lastAssistantUpdateAt: null,
       selectedModelKey: null,
+      currentWorkingDirectory: null,
     });
     await app.conversations.setActiveId(newId);
     setActiveView('chat');
@@ -732,7 +737,7 @@ function AppShell() {
             <div className="titlebar-drag relative flex h-14 items-center justify-center border-b border-sidebar-border/80 px-4">
               <div className="pointer-events-none absolute inset-y-0 left-0 w-20" />
               <span className="titlebar-no-drag inline-flex items-center gap-0.5 text-sm font-medium text-sidebar-foreground">
-                <span className="app-gradient-text app-wordmark">{__BRAND_WORDMARK}</span>
+                <span className={`app-wordmark ${(config?.ui as Record<string, unknown> | undefined)?.gradientText !== false && __BRAND_THEME_GRADIENT_TEXT !== 'false' ? 'app-gradient-text' : 'app-gradient-text-off'}`}>{__BRAND_WORDMARK}</span>
                 <CpuIcon className="h-4 w-4 text-primary/80" />
               </span>
             </div>

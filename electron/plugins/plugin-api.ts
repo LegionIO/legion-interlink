@@ -1,4 +1,5 @@
 import { shell, BrowserWindow } from 'electron';
+import { applyBrandUserAgent } from '../utils/user-agent.js';
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'http';
 import { URL } from 'url';
 import { z } from 'zod';
@@ -269,6 +270,7 @@ export function createPluginAPI(
               contextIsolation: true,
             },
           });
+          applyBrandUserAgent(authWin.webContents);
 
           const timeout = setTimeout(() => {
             if (!settled) {

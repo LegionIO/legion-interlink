@@ -120,7 +120,6 @@ export function createAzureSpeechAdapter(config: AzureTtsConfig): SpeechSynthesi
               'Ocp-Apim-Subscription-Key': config.subscriptionKey,
               'Content-Type': 'application/ssml+xml',
               'X-Microsoft-OutputFormat': config.outputFormat,
-              'User-Agent': __BRAND_USER_AGENT,
             },
             body: ssml,
             signal: abortController.signal,

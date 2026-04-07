@@ -46,8 +46,8 @@ function StatusDot({ status }: { status: string }) {
   if (status === 'preparing') {
     return (
       <span className="relative flex h-2.5 w-2.5">
-        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-violet-400 opacity-75" />
-        <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-violet-500" />
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
+        <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-primary" />
       </span>
     );
   }
@@ -189,7 +189,7 @@ export const CallOverlay: FC = () => {
   return (
     <div className="relative z-20 border-t border-border/70 bg-background/88 px-6 pb-6 pt-4 backdrop-blur-md">
       <div className="mx-auto w-full max-w-5xl">
-        <div className="flex flex-col gap-3 rounded-[1.7rem] border border-border/70 bg-card/78 px-4 py-4 shadow-[inset_0_0_0_1px_rgba(197,194,245,0.08),0_12px_40px_rgba(5,4,15,0.18)]">
+        <div className="flex flex-col gap-3 rounded-[1.7rem] border border-border/70 bg-card/78 px-4 py-4 app-composer-shadow">
           {/* Row 1: Status, audio levels, timer */}
           <div className="flex items-center justify-between px-1">
             <div className="flex items-center gap-2.5">

@@ -29,7 +29,8 @@ const appAPI = {
       reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh',
       profileKey?: string,
       fallbackEnabled?: boolean,
-    ) => ipcRenderer.invoke('agent:stream', conversationId, messages, modelKey, reasoningEffort, profileKey, fallbackEnabled),
+      cwd?: string,
+    ) => ipcRenderer.invoke('agent:stream', conversationId, messages, modelKey, reasoningEffort, profileKey, fallbackEnabled, cwd),
     cancelStream: (conversationId: string) =>
       ipcRenderer.invoke('agent:cancel-stream', conversationId),
     generateTitle: (messages: unknown[], modelKey?: string) =>
@@ -255,6 +256,7 @@ const appAPI = {
   dialog: {
     openFile: (options?: { filters?: Array<{ name: string; extensions: string[] }> }) =>
       ipcRenderer.invoke('dialog:open-file', options),
+    openDirectory: () => ipcRenderer.invoke('dialog:open-directory'),
     openDirectoryFiles: () => ipcRenderer.invoke('dialog:open-directory-files'),
   },
 

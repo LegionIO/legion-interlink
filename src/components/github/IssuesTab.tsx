@@ -78,7 +78,7 @@ export const IssuesTab: FC<Props> = ({ repoFilter }) => {
               >
                 {issue.state === 'open'
                   ? <CircleDotIcon className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
-                  : <CheckCircle2Icon className="mt-0.5 h-4 w-4 shrink-0 text-purple-400" />
+                  : <CheckCircle2Icon className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
                 }
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">

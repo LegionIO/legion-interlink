@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { OpenAI } from 'openai';
+import { withBrandUserAgent } from '../utils/user-agent.js';
 
 export type MediaGenProviderConfig = {
   enabled?: boolean;
@@ -35,7 +36,7 @@ export function createMediaGenClient(
   if (provider === 'openai') {
     const apiKey = config.openai?.apiKey;
     if (!apiKey) throw new Error('OpenAI API key is not configured for media generation.');
-    return new OpenAI({ apiKey });
+    return new OpenAI({ apiKey, defaultHeaders: withBrandUserAgent() });
   }
 
   if (provider === 'azure') {
@@ -56,10 +57,10 @@ export function createMediaGenClient(
     return new OpenAI({
       apiKey: azureCfg?.apiKey || 'dummy-key',
       baseURL,
-      defaultHeaders: {
+      defaultHeaders: withBrandUserAgent({
         ...(azureCfg?.apiKey ? { 'api-key': azureCfg.apiKey } : {}),
         ...deploymentHeaders,
-      },
+      }),
     });
   }
 
@@ -71,7 +72,7 @@ export function createMediaGenClient(
     return new OpenAI({
       apiKey: customCfg?.apiKey || 'dummy-key',
       baseURL: baseUrl,
-      defaultHeaders: deploymentHeaders,
+      defaultHeaders: withBrandUserAgent(deploymentHeaders ?? {}),
     });
   }
 
@@ -102,10 +103,10 @@ export function resolveMediaGenEndpoint(
     if (!apiKey) throw new Error('OpenAI API key is not configured for media generation.');
     return {
       url: `https://api.openai.com/v1${path}`,
-      headers: {
+      headers: withBrandUserAgent({
         'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
-      },
+      }),
     };
   }
 
@@ -118,10 +119,10 @@ export function resolveMediaGenEndpoint(
       // Newer Azure APIs (audio, etc.) live on cognitiveservices.azure.com at /openai/v1/...
       endpoint = endpoint.replace('.openai.azure.com', '.cognitiveservices.azure.com');
       const url = `${endpoint}/openai/v1${path}`;
-      const headers: Record<string, string> = {
+      const headers = withBrandUserAgent({
         'Content-Type': 'application/json',
         ...(azureCfg?.apiKey ? { 'api-key': azureCfg.apiKey } : {}),
-      };
+      });
       return { url, headers };
     }
 
@@ -132,10 +133,10 @@ export function resolveMediaGenEndpoint(
     if (!deploymentName) throw new Error('Azure deployment name is not configured for media generation.');
 
     const url = `${endpoint}/openai/deployments/${deploymentName}${path}?api-version=${apiVersion}`;
-    const headers: Record<string, string> = {
+    const headers = withBrandUserAgent({
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${azureCfg?.apiKey ?? ''}`,
-    };
+    });
 
     return { url, headers };
   }
@@ -145,7 +146,7 @@ export function resolveMediaGenEndpoint(
     const baseUrl = customCfg?.baseUrl?.replace(/\/+$/, '');
     if (!baseUrl) throw new Error('Custom base URL is not configured for media generation.');
 
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const headers = withBrandUserAgent({ 'Content-Type': 'application/json' });
     if (customCfg?.apiKey) {
       headers['Authorization'] = `Bearer ${customCfg.apiKey}`;
     }

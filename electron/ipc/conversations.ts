@@ -26,6 +26,7 @@ type ConversationRecord = {
   selectedProfileKey?: string | null;
   fallbackEnabled?: boolean;
   profilePrimaryModelKey?: string | null;
+  currentWorkingDirectory?: string | null;
 };
 
 type ConversationsStore = {

@@ -138,6 +138,7 @@ function toMastraTools(
       result: unknown;
     }) => Promise<unknown> | unknown;
   },
+  executionContext?: Pick<ToolExecutionContext, 'cwd'>,
 ): Record<string, ReturnType<typeof createTool>> {
   const result: Record<string, ReturnType<typeof createTool>> = {};
   for (const tool of tools) {
@@ -168,6 +169,7 @@ function toMastraTools(
         const ctx: ToolExecutionContext = {
           toolCallId,
           conversationId,
+          cwd: executionContext?.cwd,
           abortSignal: mergedAbortSignal,
           onProgress: (progress: ToolProgressEvent) => {
             hooks?.emitEvent?.({
@@ -313,6 +315,7 @@ export async function* streamAgentResponse(
   options?: {
     reasoningEffort?: ReasoningEffort;
     abortSignal?: AbortSignal;
+    cwd?: string;
     emitEvent?: (event: StreamEvent) => void;
     onToolExecutionStart?: (state: { toolCallId: string; toolName: string; args: unknown; cancel: () => void }) => void;
     onToolExecutionEnd?: (state: { toolCallId: string; toolName: string }) => void;
@@ -329,7 +332,7 @@ export async function* streamAgentResponse(
     onToolExecutionStart: options?.onToolExecutionStart,
     onToolExecutionEnd: options?.onToolExecutionEnd,
     augmentToolResult: options?.augmentToolResult,
-  });
+  }, { cwd: options?.cwd });
 
   const buildAgent = async (activeModelConfig: LLMModelConfig): Promise<Agent> => {
     const model = await createLanguageModelFromConfig(activeModelConfig);
@@ -762,6 +765,7 @@ export async function* streamWithFallback(
   options?: {
     reasoningEffort?: ReasoningEffort;
     abortSignal?: AbortSignal;
+    cwd?: string;
     emitEvent?: (event: StreamEvent) => void;
     onToolExecutionStart?: (state: { toolCallId: string; toolName: string; args: unknown; cancel: () => void }) => void;
     onToolExecutionEnd?: (state: { toolCallId: string; toolName: string }) => void;

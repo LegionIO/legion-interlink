@@ -35,7 +35,7 @@ const NODE_COLORS: Record<string, { bg: string; border: string; text: string }> 
   extension: { bg: '#3b82f620', border: '#3b82f680', text: '#3b82f6' },
   worker: { bg: '#10b98120', border: '#10b98180', text: '#10b981' },
   schedule: { bg: '#f59e0b20', border: '#f59e0b80', text: '#f59e0b' },
-  node: { bg: '#8b5cf620', border: '#8b5cf680', text: '#8b5cf6' },
+  node: { bg: 'var(--brand-accent-subtle)', border: 'var(--brand-accent-glow)', text: 'var(--brand-accent)' },
 };
 
 const NODE_RADIUS = 28;

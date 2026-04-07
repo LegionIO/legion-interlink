@@ -33,93 +33,163 @@
   --color-sidebar-accent: var(--sidebar-accent);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
+  --color-brand: var(--brand-accent);
+  --color-brand-foreground: var(--brand-accent-fg);
 }
 
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Brand hue: the single control point for the entire color palette.
+ * Override --brand-hue via JS (ThemeInjector) to re-hue the whole UI.
+ * Default: 292 (purple/violet).
+ * ───────────────────────────────────────────────────────────────────────────── */
+
 :root {
+  --brand-hue: 292;
   --radius: 0.85rem;
-  --background: oklch(0.975 0.008 292);
-  --foreground: oklch(0.28 0.03 292);
-  --card: oklch(0.995 0.003 292);
-  --card-foreground: oklch(0.28 0.03 292);
-  --popover: oklch(0.995 0.003 292);
-  --popover-foreground: oklch(0.28 0.03 292);
-  --primary: oklch(0.57 0.12 292);
-  --primary-foreground: oklch(0.985 0.003 292);
-  --secondary: oklch(0.94 0.012 292);
-  --secondary-foreground: oklch(0.33 0.025 292);
-  --muted: oklch(0.95 0.01 292);
-  --muted-foreground: oklch(0.53 0.02 292);
-  --accent: oklch(0.92 0.02 292);
-  --accent-foreground: oklch(0.31 0.026 292);
+
+  /* ── Semantic palette (light) derived from --brand-hue ───────────────── */
+  --background: oklch(0.975 0.008 var(--brand-hue));
+  --foreground: oklch(0.28 0.03 var(--brand-hue));
+  --card: oklch(0.995 0.003 var(--brand-hue));
+  --card-foreground: oklch(0.28 0.03 var(--brand-hue));
+  --popover: oklch(0.995 0.003 var(--brand-hue));
+  --popover-foreground: oklch(0.28 0.03 var(--brand-hue));
+  --primary: oklch(0.57 0.12 var(--brand-hue));
+  --primary-foreground: oklch(0.985 0.003 var(--brand-hue));
+  --secondary: oklch(0.94 0.012 var(--brand-hue));
+  --secondary-foreground: oklch(0.33 0.025 var(--brand-hue));
+  --muted: oklch(0.95 0.01 var(--brand-hue));
+  --muted-foreground: oklch(0.53 0.02 var(--brand-hue));
+  --accent: oklch(0.92 0.02 var(--brand-hue));
+  --accent-foreground: oklch(0.31 0.026 var(--brand-hue));
   --destructive: oklch(0.63 0.22 21);
-  --border: oklch(0.84 0.02 292 / 72%);
-  --input: oklch(0.89 0.015 292 / 92%);
-  --ring: oklch(0.62 0.11 292 / 42%);
-  --sidebar: oklch(0.955 0.012 292);
-  --sidebar-foreground: oklch(0.28 0.03 292);
-  --sidebar-primary: oklch(0.57 0.12 292);
-  --sidebar-primary-foreground: oklch(0.985 0.003 292);
-  --sidebar-accent: oklch(0.92 0.018 292);
-  --sidebar-accent-foreground: oklch(0.31 0.026 292);
-  --sidebar-border: oklch(0.83 0.018 292 / 70%);
-  --app-shell-glow: rgba(127, 119, 221, 0.16);
-  --app-edge: rgba(127, 119, 221, 0.10);
+  --border: oklch(0.84 0.02 var(--brand-hue) / 72%);
+  --input: oklch(0.89 0.015 var(--brand-hue) / 92%);
+  --ring: oklch(0.62 0.11 var(--brand-hue) / 42%);
+
+  /* Sidebar */
+  --sidebar: oklch(0.955 0.012 var(--brand-hue));
+  --sidebar-foreground: oklch(0.28 0.03 var(--brand-hue));
+  --sidebar-primary: oklch(0.57 0.12 var(--brand-hue));
+  --sidebar-primary-foreground: oklch(0.985 0.003 var(--brand-hue));
+  --sidebar-accent: oklch(0.92 0.018 var(--brand-hue));
+  --sidebar-accent-foreground: oklch(0.31 0.026 var(--brand-hue));
+  --sidebar-border: oklch(0.83 0.018 var(--brand-hue) / 70%);
+
+  /* ── Brand accent: used by components for brand-colored indicators ──── */
+  --brand-accent: oklch(0.57 0.12 var(--brand-hue));
+  --brand-accent-fg: oklch(0.985 0.003 var(--brand-hue));
+  --brand-accent-subtle: oklch(0.57 0.12 var(--brand-hue) / 10%);
+  --brand-accent-muted: oklch(0.57 0.12 var(--brand-hue) / 20%);
+  --brand-accent-border: oklch(0.57 0.12 var(--brand-hue) / 25%);
+  --brand-accent-glow: oklch(0.57 0.12 var(--brand-hue) / 40%);
+
+  /* ── App shell accents (light) ──────────────────────────────────────── */
+  --app-shell-glow: oklch(0.60 0.10 var(--brand-hue) / 16%);
+  --app-edge: oklch(0.60 0.10 var(--brand-hue) / 10%);
   --app-panel: rgba(255, 255, 255, 0.82);
   --app-overlay: rgba(255, 255, 255, 0.58);
-  --app-panel-shadow: 0 18px 50px rgba(88, 78, 156, 0.12);
-  --app-chip-shadow: 0 8px 24px rgba(88, 78, 156, 0.10);
+  --app-panel-shadow: 0 18px 50px oklch(0.42 0.08 var(--brand-hue) / 12%);
+  --app-chip-shadow: 0 8px 24px oklch(0.42 0.08 var(--brand-hue) / 10%);
+  --app-chip-border: oklch(0.78 0.06 var(--brand-hue) / 12%);
   --app-user-bubble: rgba(255, 255, 255, 0.82);
-  --app-user-bubble-border: rgba(127, 119, 221, 0.14);
-  --app-user-bubble-shadow: 0 12px 28px rgba(88, 78, 156, 0.10);
+  --app-user-bubble-border: oklch(0.60 0.10 var(--brand-hue) / 14%);
+  --app-user-bubble-shadow: 0 12px 28px oklch(0.42 0.08 var(--brand-hue) / 10%);
   --app-file-chip: rgba(255, 255, 255, 0.78);
   --app-file-chip-hover: rgba(255, 255, 255, 0.94);
-  --app-active-item: rgba(127, 119, 221, 0.12);
-  --app-active-item-ring: rgba(127, 119, 221, 0.18);
+  --app-active-item: oklch(0.60 0.10 var(--brand-hue) / 12%);
+  --app-active-item-ring: oklch(0.60 0.10 var(--brand-hue) / 18%);
   --app-matrix-fade: rgba(252, 251, 255, 0.22);
-  --app-matrix-glyph: rgba(127, 119, 221, 0.45);
+  --app-matrix-glyph: oklch(0.60 0.10 var(--brand-hue) / 45%);
+  --app-composer-shadow-inner: oklch(0.78 0.06 var(--brand-hue) / 8%);
+  --app-composer-shadow-outer: oklch(0.10 0.02 var(--brand-hue) / 18%);
+  --app-unread-glow: oklch(0.78 0.06 var(--brand-hue) / 38%);
+  --app-cursor-ring: oklch(0.68 0.10 var(--brand-hue) / 80%);
+  --app-cursor-fill: oklch(0.60 0.12 var(--brand-hue) / 80%);
+  --app-cursor-ring-border: oklch(0.70 0.08 var(--brand-hue) / 80%);
+  --app-cursor-ping: oklch(0.68 0.10 var(--brand-hue) / 80%);
+  --app-overlay-border: oklch(0.68 0.15 var(--brand-hue) / 30%);
+  --app-overlay-border-active: oklch(0.68 0.15 var(--brand-hue) / 55%);
+
+  /* Gradient text stops (light mode) */
+  --app-gradient-1: oklch(0.55 0.11 var(--brand-hue) / 92%);
+  --app-gradient-2: oklch(0.50 0.12 var(--brand-hue) / 95%);
+  --app-gradient-3: oklch(0.70 0.08 var(--brand-hue) / 88%);
+  --app-gradient-4: oklch(0.48 0.12 var(--brand-hue) / 95%);
+  --app-gradient-5: oklch(0.45 0.12 var(--brand-hue) / 94%);
+  --app-gradient-stroke: oklch(0.45 0.11 var(--brand-hue) / 18%);
+  --app-gradient-glow: oklch(0.65 0.10 var(--brand-hue) / 10%);
 }
 
 .dark {
-  --background: oklch(0.15 0.02 292);
-  --foreground: oklch(0.95 0.015 290);
-  --card: oklch(0.19 0.02 292);
-  --card-foreground: oklch(0.95 0.015 290);
-  --popover: oklch(0.19 0.02 292);
-  --popover-foreground: oklch(0.95 0.015 290);
-  --primary: oklch(0.84 0.085 292);
-  --primary-foreground: oklch(0.18 0.02 292);
-  --secondary: oklch(0.22 0.018 292);
-  --secondary-foreground: oklch(0.95 0.015 290);
-  --muted: oklch(0.21 0.016 292);
-  --muted-foreground: oklch(0.73 0.02 292);
-  --accent: oklch(0.25 0.022 292);
-  --accent-foreground: oklch(0.97 0.01 290);
+  --background: oklch(0.15 0.02 var(--brand-hue));
+  --foreground: oklch(0.95 0.015 var(--brand-hue));
+  --card: oklch(0.19 0.02 var(--brand-hue));
+  --card-foreground: oklch(0.95 0.015 var(--brand-hue));
+  --popover: oklch(0.19 0.02 var(--brand-hue));
+  --popover-foreground: oklch(0.95 0.015 var(--brand-hue));
+  --primary: oklch(0.84 0.085 var(--brand-hue));
+  --primary-foreground: oklch(0.18 0.02 var(--brand-hue));
+  --secondary: oklch(0.22 0.018 var(--brand-hue));
+  --secondary-foreground: oklch(0.95 0.015 var(--brand-hue));
+  --muted: oklch(0.21 0.016 var(--brand-hue));
+  --muted-foreground: oklch(0.73 0.02 var(--brand-hue));
+  --accent: oklch(0.25 0.022 var(--brand-hue));
+  --accent-foreground: oklch(0.97 0.01 var(--brand-hue));
   --destructive: oklch(0.69 0.20 21);
-  --border: oklch(0.33 0.028 292 / 34%);
-  --input: oklch(0.28 0.02 292 / 40%);
-  --ring: oklch(0.81 0.08 292 / 45%);
-  --sidebar: oklch(0.145 0.018 292);
-  --sidebar-foreground: oklch(0.95 0.015 290);
-  --sidebar-primary: oklch(0.84 0.085 292);
-  --sidebar-primary-foreground: oklch(0.18 0.02 292);
-  --sidebar-accent: oklch(0.20 0.018 292);
-  --sidebar-accent-foreground: oklch(0.97 0.01 290);
-  --sidebar-border: oklch(0.31 0.025 292 / 34%);
-  --app-shell-glow: rgba(127, 119, 221, 0.14);
-  --app-edge: rgba(197, 194, 245, 0.08);
+  --border: oklch(0.33 0.028 var(--brand-hue) / 34%);
+  --input: oklch(0.28 0.02 var(--brand-hue) / 40%);
+  --ring: oklch(0.81 0.08 var(--brand-hue) / 45%);
+
+  --sidebar: oklch(0.145 0.018 var(--brand-hue));
+  --sidebar-foreground: oklch(0.95 0.015 var(--brand-hue));
+  --sidebar-primary: oklch(0.84 0.085 var(--brand-hue));
+  --sidebar-primary-foreground: oklch(0.18 0.02 var(--brand-hue));
+  --sidebar-accent: oklch(0.20 0.018 var(--brand-hue));
+  --sidebar-accent-foreground: oklch(0.97 0.01 var(--brand-hue));
+  --sidebar-border: oklch(0.31 0.025 var(--brand-hue) / 34%);
+
+  --brand-accent: oklch(0.84 0.085 var(--brand-hue));
+  --brand-accent-fg: oklch(0.18 0.02 var(--brand-hue));
+  --brand-accent-subtle: oklch(0.60 0.12 var(--brand-hue) / 10%);
+  --brand-accent-muted: oklch(0.60 0.12 var(--brand-hue) / 20%);
+  --brand-accent-border: oklch(0.60 0.12 var(--brand-hue) / 25%);
+  --brand-accent-glow: oklch(0.70 0.10 var(--brand-hue) / 40%);
+
+  --app-shell-glow: oklch(0.60 0.10 var(--brand-hue) / 14%);
+  --app-edge: oklch(0.78 0.06 var(--brand-hue) / 8%);
   --app-panel: rgba(255, 255, 255, 0.02);
   --app-overlay: rgba(14, 12, 26, 0.48);
   --app-panel-shadow: 0 18px 50px rgba(5, 4, 15, 0.22);
   --app-chip-shadow: 0 8px 24px rgba(5, 4, 15, 0.18);
+  --app-chip-border: oklch(0.78 0.06 var(--brand-hue) / 12%);
   --app-user-bubble: rgba(255, 255, 255, 0.085);
   --app-user-bubble-border: rgba(255, 255, 255, 0.10);
   --app-user-bubble-shadow: 0 12px 28px rgba(5, 4, 15, 0.18);
   --app-file-chip: rgba(255, 255, 255, 0.10);
   --app-file-chip-hover: rgba(255, 255, 255, 0.15);
   --app-active-item: rgba(255, 255, 255, 0.08);
-  --app-active-item-ring: rgba(197, 194, 245, 0.14);
+  --app-active-item-ring: oklch(0.78 0.06 var(--brand-hue) / 14%);
   --app-matrix-fade: rgba(10, 8, 18, 0.08);
-  --app-matrix-glyph: rgba(197, 194, 245, 0.70);
+  --app-matrix-glyph: oklch(0.78 0.06 var(--brand-hue) / 70%);
+  --app-composer-shadow-inner: oklch(0.78 0.06 var(--brand-hue) / 8%);
+  --app-composer-shadow-outer: oklch(0.06 0.01 var(--brand-hue) / 28%);
+  --app-unread-glow: oklch(0.78 0.06 var(--brand-hue) / 38%);
+  --app-cursor-ring: oklch(0.68 0.10 var(--brand-hue) / 80%);
+  --app-cursor-fill: oklch(0.60 0.12 var(--brand-hue) / 80%);
+  --app-cursor-ring-border: oklch(0.70 0.08 var(--brand-hue) / 80%);
+  --app-cursor-ping: oklch(0.68 0.10 var(--brand-hue) / 80%);
+  --app-overlay-border: oklch(0.68 0.15 var(--brand-hue) / 30%);
+  --app-overlay-border-active: oklch(0.68 0.15 var(--brand-hue) / 55%);
+
+  /* Gradient text stops (dark mode) */
+  --app-gradient-1: oklch(0.92 0.03 var(--brand-hue) / 95%);
+  --app-gradient-2: oklch(0.78 0.06 var(--brand-hue) / 96%);
+  --app-gradient-3: oklch(0.96 0.02 var(--brand-hue) / 98%);
+  --app-gradient-4: oklch(0.70 0.08 var(--brand-hue) / 94%);
+  --app-gradient-5: oklch(0.60 0.10 var(--brand-hue) / 90%);
+  --app-gradient-stroke: oklch(0.60 0.10 var(--brand-hue) / 12%);
+  --app-gradient-glow: oklch(0.65 0.10 var(--brand-hue) / 12%);
 }
 
 @layer base {
@@ -173,13 +243,13 @@
 /* Content part dividers for multi-part assistant messages.
    The assistant message bubble wraps MessagePrimitive.Content which renders
    parts as adjacent sibling elements. Target the bg-muted container's children. */
-.aui-assistant-content > * + * {
+.aui-assistant-content > :not(.aui-assistant-badge) + :not(.aui-assistant-badge) {
   margin-top: 0.5rem;
   padding-top: 0.5rem;
   border-top: 1px solid oklch(0.5 0 0 / 12%);
 }
 
-.dark .aui-assistant-content > * + * {
+.dark .aui-assistant-content > :not(.aui-assistant-badge) + :not(.aui-assistant-badge) {
   border-top-color: oklch(0.5 0 0 / 18%);
 }
 
@@ -189,7 +259,7 @@
 .aui-assistant-content .aui-typing-dots {
   display: block;
 }
-.aui-assistant-content > :not(.aui-typing-dots) ~ .aui-typing-dots {
+.aui-assistant-content > :not(.aui-typing-dots):not(.aui-assistant-badge) ~ .aui-typing-dots {
   display: none;
 }
 
@@ -211,25 +281,27 @@
   white-space: pre-wrap;
 }
 
-/* Animated gradient text for branding */
+/* Animated gradient text for branding — derived from --brand-hue */
 .app-gradient-text {
   background:
-    linear-gradient(115deg, rgba(233,229,255,0.95) 0%, rgba(197,194,245,0.96) 35%, rgba(244,242,255,0.98) 50%, rgba(160,154,232,0.94) 75%, rgba(127,119,221,0.9) 100%);
+    linear-gradient(115deg, var(--app-gradient-1) 0%, var(--app-gradient-2) 35%, var(--app-gradient-3) 50%, var(--app-gradient-4) 75%, var(--app-gradient-5) 100%);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
-  text-shadow: 0 0 16px rgba(160, 154, 232, 0.12);
+  text-shadow: 0 0 16px var(--app-gradient-glow);
 }
 
 html:not(.dark) .app-gradient-text {
-  background:
-    linear-gradient(115deg, rgba(147, 138, 229, 0.92) 0%, rgba(121, 110, 214, 0.95) 32%, rgba(184, 176, 244, 0.88) 50%, rgba(113, 103, 210, 0.95) 72%, rgba(102, 91, 199, 0.94) 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-stroke: 0.35px rgba(98, 88, 190, 0.18);
+  -webkit-text-stroke: 0.35px var(--app-gradient-stroke);
   text-shadow:
-    0 0 12px rgba(160, 154, 232, 0.10),
+    0 0 12px var(--app-gradient-glow),
     0 1px 0 rgba(255, 255, 255, 0.38);
+}
+
+/* Plain wordmark (used when gradientText is disabled) */
+.app-gradient-text-off {
+  color: var(--primary);
+  -webkit-text-fill-color: unset;
 }
 
 .app-wordmark {
@@ -264,8 +336,20 @@ html:not(.dark) .app-gradient-text {
   border-radius: 1rem;
   background: linear-gradient(180deg, rgba(255,255,255,0.22), rgba(255,255,255,0.08));
   box-shadow:
-    inset 0 0 0 1px rgba(197, 194, 245, 0.12),
+    inset 0 0 0 1px var(--app-chip-border),
     var(--app-chip-shadow);
+}
+
+/* Composer / card panel shadow — used on the main composer, call overlay, guidance panel */
+.app-composer-shadow {
+  box-shadow:
+    inset 0 0 0 1px var(--app-composer-shadow-inner),
+    0 12px 40px var(--app-composer-shadow-outer);
+}
+
+/* Unread dot glow */
+.app-unread-glow {
+  box-shadow: 0 0 10px var(--app-unread-glow);
 }
 
 /* Shiki dark mode support */
@@ -314,8 +398,8 @@ html:not(.dark) .app-gradient-text {
 
 /* Computer Use Overlay — subtle breathing glow on the border */
 @keyframes overlay-border-pulse {
-  0%, 100% { border-color: rgba(168, 85, 247, 0.30); }
-  50% { border-color: rgba(168, 85, 247, 0.55); }
+  0%, 100% { border-color: var(--app-overlay-border); }
+  50% { border-color: var(--app-overlay-border-active); }
 }
 
 @keyframes overlay-icon-pulse {

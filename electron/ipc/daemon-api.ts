@@ -12,6 +12,7 @@ import {
   daemonPut,
   daemonDelete,
 } from '../lib/daemon-client.js';
+import { withBrandUserAgent } from '../utils/user-agent.js';
 
 export function registerDaemonApiHandlers(
   ipcMain: IpcMain,
@@ -180,10 +181,10 @@ export function registerDaemonApiHandlers(
       const connectTimeout = AbortSignal.timeout(DAEMON_TIMEOUT_MS);
       const combined = AbortSignal.any([connectTimeout, eventsAbort.signal]);
       const resp = await fetch(url, {
-        headers: {
+        headers: withBrandUserAgent({
           'accept': 'text/event-stream',
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        }),
         signal: combined,
       });
 
@@ -451,10 +452,10 @@ export function registerDaemonApiHandlers(
     const token = resolveAuthToken(cfg(), appHome);
     try {
       const resp = await fetch(url, {
-        headers: {
+        headers: withBrandUserAgent({
           'accept': 'application/json, text/plain',
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        }),
         ...withTimeout(),
       });
       if (!resp.ok) return { ok: false, error: `HTTP ${resp.status}` };

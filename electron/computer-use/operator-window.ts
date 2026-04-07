@@ -1,5 +1,6 @@
 import { BrowserWindow } from 'electron';
 import { join } from 'node:path';
+import { applyBrandUserAgent } from '../utils/user-agent.js';
 
 const operatorWindows = new Map<string, BrowserWindow>();
 const setupWindows = new Map<string, BrowserWindow>();
@@ -11,7 +12,7 @@ function getSetupWindowKey(conversationId?: string | null): string {
 
 function createOperatorBrowserWindow(title: string): BrowserWindow {
   const preloadPath = join(__dirname, '../preload/index.mjs');
-  return new BrowserWindow({
+  const win = new BrowserWindow({
     width: 1280,
     height: 900,
     title,
@@ -22,6 +23,8 @@ function createOperatorBrowserWindow(title: string): BrowserWindow {
       sandbox: false,
     },
   });
+  applyBrandUserAgent(win.webContents);
+  return win;
 }
 
 function revealWindow(win: BrowserWindow): void {

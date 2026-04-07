@@ -5,6 +5,7 @@ import type { ToolDefinition } from './types.js';
 import type { AppConfig } from '../config/schema.js';
 import { runCommandWithStreaming, DEFAULT_PROCESS_STREAMING_CONFIG, resolveProcessStreamingConfig } from './process-runner.js';
 import { runToolExecution, throwIfAborted } from './execution.js';
+import { resolveToolPath } from './path-utils.js';
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
@@ -48,16 +49,17 @@ export function createGrepTool(getConfig?: () => AppConfig): ToolDefinition {
           pattern: string; path: string; glob?: string;
           context?: number; maxResults?: number; caseInsensitive?: boolean;
         };
+        const resolvedPath = resolveToolPath(path, context.cwd);
         const streaming = getConfig ? resolveProcessStreamingConfig(getConfig()) : DEFAULT_PROCESS_STREAMING_CONFIG;
 
-        if (!(await pathExists(path))) return { error: `Path not found: ${path}`, isError: true };
+        if (!(await pathExists(resolvedPath))) return { error: `Path not found: ${resolvedPath}`, isError: true };
         throwIfAborted(signal);
 
         const rgArgs: string[] = ['rg', '--json'];
         if (caseInsensitive) rgArgs.push('-i');
         if (lineContext > 0) rgArgs.push('-C', String(lineContext));
         if (glob) rgArgs.push('--glob', shellQuote(glob));
-        rgArgs.push('-m', String(maxResults), '--', shellQuote(pattern), shellQuote(path));
+        rgArgs.push('-m', String(maxResults), '--', shellQuote(pattern), shellQuote(resolvedPath));
 
         const rgResult = await runCommandWithStreaming({
           command: rgArgs.join(' '),
@@ -83,17 +85,17 @@ export function createGrepTool(getConfig?: () => AppConfig): ToolDefinition {
               // Skip malformed lines.
             }
           }
-          return { matches, count: matches.length };
+          return { matches, count: matches.length, path: resolvedPath };
         }
 
         // rg returns exit code 1 when no matches found
-        if (rgResult.exitCode === 1) return { matches: [], count: 0 };
+        if (rgResult.exitCode === 1) return { matches: [], count: 0, path: resolvedPath };
 
         // Fallback to basic grep if rg is unavailable/error.
         const flags = caseInsensitive ? '-rn -i' : '-rn';
         const grepCmd = glob
-          ? `grep ${flags} --include=${shellQuote(glob)} -m ${maxResults} ${shellQuote(pattern)} ${shellQuote(path)}`
-          : `grep ${flags} -m ${maxResults} ${shellQuote(pattern)} ${shellQuote(path)}`;
+          ? `grep ${flags} --include=${shellQuote(glob)} -m ${maxResults} ${shellQuote(pattern)} ${shellQuote(resolvedPath)}`
+          : `grep ${flags} -m ${maxResults} ${shellQuote(pattern)} ${shellQuote(resolvedPath)}`;
         const grepResult = await runCommandWithStreaming({
           command: grepCmd,
           timeoutMs: 30000,
@@ -105,7 +107,7 @@ export function createGrepTool(getConfig?: () => AppConfig): ToolDefinition {
           return { matches: [], count: 0 };
         }
         const parsed = parseGrepMatches(grepResult.stdout);
-        return { matches: parsed, count: parsed.length };
+        return { matches: parsed, count: parsed.length, path: resolvedPath };
       },
     }),
   };
@@ -127,13 +129,14 @@ export function createGlobTool(getConfig?: () => AppConfig): ToolDefinition {
         const { pattern, path: rootPath, maxResults = 100 } = input as {
           pattern: string; path: string; maxResults?: number;
         };
+        const resolvedRootPath = resolveToolPath(rootPath, context.cwd);
         const streaming = getConfig ? resolveProcessStreamingConfig(getConfig()) : DEFAULT_PROCESS_STREAMING_CONFIG;
 
-        if (!(await pathExists(rootPath))) return { error: `Path not found: ${rootPath}`, isError: true };
+        if (!(await pathExists(resolvedRootPath))) return { error: `Path not found: ${resolvedRootPath}`, isError: true };
         throwIfAborted(signal);
 
         const normalizedPattern = pattern.replace(/\*\*\//g, '');
-        const cmd = `find ${shellQuote(rootPath)} -type f -name ${shellQuote(normalizedPattern)} 2>/dev/null | head -${Math.max(1, Math.floor(maxResults))}`;
+        const cmd = `find ${shellQuote(resolvedRootPath)} -type f -name ${shellQuote(normalizedPattern)} 2>/dev/null | head -${Math.max(1, Math.floor(maxResults))}`;
         const result = await runCommandWithStreaming({
           command: cmd,
           timeoutMs: 15000,
@@ -143,7 +146,7 @@ export function createGlobTool(getConfig?: () => AppConfig): ToolDefinition {
 
         if (result.exitCode !== 0 && !result.stdout.trim()) return { files: [], count: 0 };
         const files = result.stdout.split('\n').filter(Boolean);
-        return { files, count: files.length };
+        return { files, count: files.length, path: resolvedRootPath };
       },
     }),
   };
@@ -163,18 +166,19 @@ export function createListDirectoryTool(): ToolDefinition {
       run: async (signal) => {
         throwIfAborted(signal);
         const { path: dirPath, showHidden = false } = input as { path: string; showHidden?: boolean };
+        const resolvedDirPath = resolveToolPath(dirPath, context.cwd);
 
-        if (!(await pathExists(dirPath))) return { error: `Path not found: ${dirPath}`, isError: true };
+        if (!(await pathExists(resolvedDirPath))) return { error: `Path not found: ${resolvedDirPath}`, isError: true };
         throwIfAborted(signal);
 
-        const entries = await readdir(dirPath);
+        const entries = await readdir(resolvedDirPath);
         const sliced = entries
           .filter((name) => showHidden || !name.startsWith('.'))
           .slice(0, 500);
 
         const items = await Promise.all(sliced.map(async (name) => {
           try {
-            const fullPath = join(dirPath, name);
+            const fullPath = join(resolvedDirPath, name);
             const info = await stat(fullPath);
             return {
               name,
@@ -187,7 +191,7 @@ export function createListDirectoryTool(): ToolDefinition {
           }
         }));
 
-        return { items, count: items.length, path: dirPath };
+        return { items, count: items.length, path: resolvedDirPath };
       },
     }),
   };

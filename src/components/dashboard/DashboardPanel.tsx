@@ -252,7 +252,7 @@ export const DashboardPanel: FC<{ onClose: () => void }> = () => {
                 label="Tasks"
                 value={String(tasks.total)}
                 sub={`${tasks.running} running · ${tasks.failed} failed`}
-                accent="text-violet-400"
+                accent="text-primary"
               />
               <StatCard
                 icon={CpuIcon}

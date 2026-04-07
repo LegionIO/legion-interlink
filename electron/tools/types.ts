@@ -15,6 +15,7 @@ export type ToolProgressEvent = {
 export type ToolExecutionContext = {
   toolCallId: string;
   conversationId?: string;
+  cwd?: string;
   abortSignal?: AbortSignal;
   onProgress?: (event: ToolProgressEvent) => void;
 };

@@ -119,6 +119,10 @@ function getDefaultConfig() {
     ui: {
       theme: 'system' as const,
       sidebarWidth: 280,
+      brandHue: Number(__BRAND_THEME_HUE) || 292,
+      brandAccent: __BRAND_THEME_ACCENT_LIGHT || '#7f77dd',
+      background: (__BRAND_THEME_BACKGROUND || 'matrix-rain') as 'matrix-rain' | 'gradient' | 'none',
+      gradientText: __BRAND_THEME_GRADIENT_TEXT !== 'false',
     },
     audio: {
       provider: 'native' as const,

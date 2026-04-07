@@ -149,13 +149,13 @@ type ChipColor = 'blue' | 'amber' | 'purple';
 const colorMap: Record<ChipColor, string> = {
   blue: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20',
   amber: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20',
-  purple: 'bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/20',
+  purple: 'bg-[var(--brand-accent-subtle)] text-primary border-[var(--brand-accent-border)]',
 };
 
 const summaryBorderMap: Record<ChipColor, string> = {
   blue: 'border-l-blue-500/40',
   amber: 'border-l-amber-500/40',
-  purple: 'border-l-violet-500/40',
+  purple: 'border-l-primary/40',
 };
 
 const ModelChip: FC<{ role: string; model: string; color: ChipColor }> = ({ role, model, color }) => (

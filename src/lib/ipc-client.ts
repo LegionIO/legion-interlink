@@ -19,7 +19,7 @@ type AppAPI = {
     onChanged: (callback: (config: unknown) => void) => () => void;
   };
   agent: {
-    stream: (conversationId: string, messages: unknown[], modelKey?: string, reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh', profileKey?: string, fallbackEnabled?: boolean) => Promise<unknown>;
+    stream: (conversationId: string, messages: unknown[], modelKey?: string, reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh', profileKey?: string, fallbackEnabled?: boolean, cwd?: string) => Promise<unknown>;
     cancelStream: (conversationId: string) => Promise<unknown>;
     generateTitle: (messages: unknown[], modelKey?: string) => Promise<{ title: string | null }>;
     appStatus: () => Promise<unknown>;
@@ -193,6 +193,7 @@ type AppAPI = {
   }>;
   dialog: {
     openFile: (options?: { filters?: Array<{ name: string; extensions: string[] }> }) => Promise<unknown>;
+    openDirectory: () => Promise<{ canceled: boolean; directoryPath?: string; name?: string }>;
     openDirectoryFiles: () => Promise<{ canceled: boolean; filePaths: string[] }>;
   };
   clipboard: {

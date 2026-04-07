@@ -36,19 +36,21 @@ import { DaemonCostTracker } from './DaemonCostTracker';
 import { DaemonMesh } from './DaemonMesh';
 import { DaemonScheduleBuilder } from './DaemonScheduleBuilder';
 import { TriggerSettings } from './TriggerSettings';
+import { AppearanceSettings } from './AppearanceSettings';
 import type { SettingsProps } from './shared';
 import { usePluginSettingsSections } from '@/components/plugins/PluginSettingsSections';
 import { getPluginComponent } from '@/components/plugins/PluginComponentRegistry';
 import { usePlugins } from '@/providers/PluginProvider';
 
 type SettingsSection =
-  | 'models' | 'profiles' | 'memory' | 'compaction' | 'tools' | 'skills' | 'sub-agents' | 'system-prompt'
+  | 'appearance' | 'models' | 'profiles' | 'memory' | 'compaction' | 'tools' | 'skills' | 'sub-agents' | 'system-prompt'
   | 'audio' | 'realtime' | 'media-generation' | 'computer-use' | 'advanced' | 'mcp'
   | 'daemon' | 'extensions' | 'tasks' | 'workers' | 'events' | 'audit'
   | 'prompts' | 'webhooks' | 'tenants' | 'capacity' | 'governance' | 'metrics' | 'doctor' | 'topology'
   | 'gaia' | 'task-graph' | 'memory-inspector' | 'cost-tracker' | 'mesh' | 'schedule-builder' | 'triggers';
 
 const sections: Array<{ key: SettingsSection; label: string; group?: string }> = [
+  { key: 'appearance', label: 'Appearance' },
   { key: 'models', label: 'Models' },
   { key: 'profiles', label: 'Profiles' },
   { key: 'memory', label: 'Memory' },
@@ -193,6 +195,7 @@ export const SettingsPanel: FC<{ onClose: () => void }> = ({ onClose }) => {
 
       {/* Section content */}
       <div className="flex-1 overflow-y-auto p-5">
+        {activeSection === 'appearance' && <AppearanceSettings config={config} updateConfig={updateConfig} />}
         {activeSection === 'models' && <ModelSettings config={config} updateConfig={updateConfig} />}
         {activeSection === 'profiles' && <ProfileSettings config={config} updateConfig={updateConfig} />}
         {activeSection === 'memory' && <MemorySettings config={config} updateConfig={updateConfig} />}

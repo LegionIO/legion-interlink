@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { open, readFile, stat } from 'fs/promises';
 import type { ToolDefinition } from './types.js';
 import { runToolExecution, throwIfAborted } from './execution.js';
+import { resolveToolPath } from './path-utils.js';
 
 async function safeStat(path: string): Promise<Awaited<ReturnType<typeof stat>> | null> {
   try {
@@ -38,13 +39,14 @@ export function createFileReadTool(): ToolDefinition {
           offset?: number;
           limit?: number;
         };
+        const resolvedPath = resolveToolPath(path, context.cwd);
 
-        const fileStat = await safeStat(path);
+        const fileStat = await safeStat(resolvedPath);
         if (!fileStat) {
-          return { error: `File not found: ${path}`, isError: true };
+          return { error: `File not found: ${resolvedPath}`, isError: true };
         }
         if (!fileStat.isFile()) {
-          return { error: `Not a file: ${path}`, isError: true };
+          return { error: `Not a file: ${resolvedPath}`, isError: true };
         }
         if (fileStat.size > 50 * 1024 * 1024) {
           return { error: `File too large (${fileStat.size} bytes). Use offset/limit or line ranges.`, isError: true };
@@ -53,27 +55,27 @@ export function createFileReadTool(): ToolDefinition {
 
         if (typeof offset === 'number') {
           const byteLimit = Math.max(1, limit || 65536);
-          const handle = await open(path, 'r');
+          const handle = await open(resolvedPath, 'r');
           try {
             const buf = Buffer.alloc(byteLimit);
             const { bytesRead } = await handle.read(buf, 0, buf.length, offset);
             throwIfAborted(signal);
             const content = buf.toString('utf-8', 0, bytesRead);
-            return { content, bytesRead, offset };
+            return { content, bytesRead, offset, path: resolvedPath };
           } finally {
             await handle.close();
           }
         }
 
-        const content = await readFile(path, 'utf-8');
+        const content = await readFile(resolvedPath, 'utf-8');
         throwIfAborted(signal);
 
         if (typeof firstChars === 'number') {
-          return { content: content.slice(0, firstChars), totalLength: content.length };
+          return { content: content.slice(0, firstChars), totalLength: content.length, path: resolvedPath };
         }
 
         if (typeof lastChars === 'number') {
-          return { content: content.slice(-lastChars), totalLength: content.length };
+          return { content: content.slice(-lastChars), totalLength: content.length, path: resolvedPath };
         }
 
         if (typeof startLine === 'number' || typeof endLine === 'number') {
@@ -82,7 +84,7 @@ export function createFileReadTool(): ToolDefinition {
           const end = Math.min(lines.length, endLine ?? lines.length);
           const selected = lines.slice(start, end);
           const numbered = selected.map((line, i) => `${start + i + 1}\t${line}`);
-          return { content: numbered.join('\n'), totalLines: lines.length, selectedRange: `${start + 1}-${end}` };
+          return { content: numbered.join('\n'), totalLines: lines.length, selectedRange: `${start + 1}-${end}`, path: resolvedPath };
         }
 
         // Full file — add line numbers
@@ -94,10 +96,11 @@ export function createFileReadTool(): ToolDefinition {
             truncated: true,
             totalLines: lines.length,
             shownLines: 2000,
+            path: resolvedPath,
           };
         }
         const numbered = lines.map((line, i) => `${i + 1}\t${line}`);
-        return { content: numbered.join('\n'), totalLines: lines.length };
+        return { content: numbered.join('\n'), totalLines: lines.length, path: resolvedPath };
       },
     }),
   };

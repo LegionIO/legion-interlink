@@ -121,7 +121,7 @@ export const PullRequestsTab: FC<Props> = ({ repoFilter }) => {
 
 const PrStateIcon: FC<{ state: string; draft?: boolean }> = ({ state, draft }) => {
   if (draft) return <GitPullRequestIcon className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />;
-  if (state === 'merged') return <GitPullRequestIcon className="mt-0.5 h-4 w-4 shrink-0 text-purple-400" />;
+  if (state === 'merged') return <GitPullRequestIcon className="mt-0.5 h-4 w-4 shrink-0 text-primary" />;
   if (state === 'closed') return <GitPullRequestIcon className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />;
   return <GitPullRequestIcon className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />;
 };

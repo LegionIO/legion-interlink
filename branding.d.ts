@@ -30,6 +30,14 @@ declare const __BRAND_JWT_ISSUER: string;
 // ── Build / packaging ─────────────────────────────────────────────────────
 declare const __BRAND_ARTIFACT_PREFIX: string;
 declare const __BRAND_MAC_CATEGORY: string;
+declare const __APP_VERSION: string;
+
+// ── Theme / visual identity ───────────────────────────────────────────────
+declare const __BRAND_THEME_HUE: string;
+declare const __BRAND_THEME_ACCENT_LIGHT: string;
+declare const __BRAND_THEME_ACCENT_DARK: string;
+declare const __BRAND_THEME_BACKGROUND: string;
+declare const __BRAND_THEME_GRADIENT_TEXT: string;
 
 // ── macOS permission-usage strings ────────────────────────────────────────
 declare const __BRAND_MICROPHONE_USAGE: string;

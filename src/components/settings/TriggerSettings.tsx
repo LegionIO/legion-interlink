@@ -42,7 +42,7 @@ const ACTION_LABELS: Record<TriggerAction, string> = {
 
 const sourceBadgeClass = (source: TriggerSource): string => {
   if (source === 'github') return 'bg-neutral-500/10 text-neutral-700 dark:text-neutral-300 border-neutral-500/20';
-  if (source === 'linear') return 'bg-violet-500/10 text-violet-700 dark:text-violet-400 border-violet-500/20';
+  if (source === 'linear') return 'bg-[var(--brand-accent-subtle)] text-primary border-[var(--brand-accent-border)]';
   return 'bg-sky-500/10 text-sky-700 dark:text-sky-400 border-sky-500/20';
 };
 

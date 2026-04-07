@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { ToolDefinition } from './types.js';
+import { withBrandUserAgent } from '../utils/user-agent.js';
 
 export const webFetchTool: ToolDefinition = {
   name: 'web_fetch',
@@ -12,7 +13,7 @@ export const webFetchTool: ToolDefinition = {
     const { url, maxLength } = input as { url: string; maxLength: number };
     try {
       const resp = await fetch(url, {
-        headers: { 'User-Agent': __BRAND_USER_AGENT },
+        headers: withBrandUserAgent(),
         signal: AbortSignal.timeout(15000),
       });
       if (!resp.ok) return { error: `HTTP ${resp.status} ${resp.statusText}` };

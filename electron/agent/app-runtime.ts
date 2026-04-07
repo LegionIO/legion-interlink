@@ -4,6 +4,7 @@ import type { AppConfig } from '../config/schema.js';
 import { resolveDaemonUrl, resolveAuthToken } from '../lib/daemon-client.js';
 import type { LLMModelConfig } from './model-catalog.js';
 import type { StreamEvent } from './mastra-agent.js';
+import { withBrandUserAgent } from '../utils/user-agent.js';
 
 export type AgentBackend = 'mastra' | 'legion-daemon';
 
@@ -44,6 +45,7 @@ type StreamAppOptions = {
   abortSignal?: AbortSignal;
   reasoningEffort?: string;
   tools?: ToolSchema[];
+  cwd?: string;
 };
 
 type RuntimeConfig = NonNullable<AppConfig['runtime']>;
@@ -228,6 +230,7 @@ async function* streamDaemonApp(options: StreamAppOptions): AsyncGenerator<Strea
   let readyResponse: Response;
   try {
     readyResponse = await fetch(readyUrl, {
+      headers: withBrandUserAgent(),
       signal: options.abortSignal ?? AbortSignal.timeout(5000),
     });
   } catch (error) {
@@ -271,6 +274,7 @@ async function* streamDaemonApp(options: StreamAppOptions): AsyncGenerator<Strea
     ...(daemonModelOverride ? { model: daemonModelOverride } : {}),
     ...(daemonProviderOverride ? { provider: daemonProviderOverride } : {}),
     ...(options.tools?.length ? { tools: options.tools } : {}),
+    ...(options.cwd ? { cwd: options.cwd } : {}),
   };
   if (options.reasoningEffort) {
     requestBody.reasoning_effort = options.reasoningEffort;
@@ -292,11 +296,11 @@ async function* streamDaemonApp(options: StreamAppOptions): AsyncGenerator<Strea
     try {
       streamResponse = await fetch(inferenceUrl, {
         method: 'POST',
-        headers: {
+        headers: withBrandUserAgent({
           'content-type': 'application/json',
           'accept': 'text/event-stream',
           ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-        },
+        }),
         body: JSON.stringify({ ...requestBody, stream: true }),
         signal: options.abortSignal,
       });
@@ -322,11 +326,11 @@ async function* streamDaemonApp(options: StreamAppOptions): AsyncGenerator<Strea
 
   const response = await fetch(inferenceUrl, {
     method: 'POST',
-    headers: {
+    headers: withBrandUserAgent({
       'content-type': 'application/json',
       ['x-' + __BRAND_APP_SLUG + '-sync']: 'true',
       ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-    },
+    }),
     body: JSON.stringify(requestBody),
     signal: options.abortSignal,
   });
@@ -644,7 +648,7 @@ async function* pollDaemonTask(
 
     let resp: Response;
     try {
-      resp = await fetch(taskUrl, { headers, signal: abortSignal });
+      resp = await fetch(taskUrl, { headers: withBrandUserAgent(headers), signal: abortSignal });
     } catch {
       if (abortSignal?.aborted) break;
       continue;
@@ -715,7 +719,10 @@ async function runDaemonHealthCheck(config: AppConfig): Promise<AppStatus['daemo
   const readyUrl = new URL('/api/ready', daemonUrl).toString();
 
   try {
-    const response = await fetch(readyUrl, { signal: AbortSignal.timeout(5000) });
+    const response = await fetch(readyUrl, {
+      headers: withBrandUserAgent(),
+      signal: AbortSignal.timeout(5000),
+    });
     let details: unknown = null;
     try {
       details = await response.json();

@@ -164,7 +164,7 @@ export const DaemonMemoryInspector: FC<SettingsProps> = () => {
               <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${
                 entry.type === 'working' ? 'bg-blue-400' :
                 entry.type === 'observational' ? 'bg-amber-400' :
-                entry.type === 'semantic' ? 'bg-purple-400' : 'bg-gray-400'
+                entry.type === 'semantic' ? 'bg-primary' : 'bg-gray-400'
               }`} />
               <div className="min-w-0 flex-1">
                 <p className="text-xs line-clamp-2">{entry.content}</p>

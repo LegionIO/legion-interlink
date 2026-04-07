@@ -42,8 +42,14 @@ export const branding = {
   mediaProtocol: 'legion-media',
   /** MCP client name sent during MCP handshake. */
   mcpClientName: 'legion',
-  /** HTTP User-Agent header value. */
-  userAgent: 'Legion-Interlink/1.0',
+  /**
+   * HTTP User-Agent template.
+   * Supported variables include:
+   * {productName}, {productToken}, {assistantName}, {appSlug}, {appId}, {executableName},
+   * {version}, {platform}, {osName}, {osVersion}, {arch},
+   * {electronVersion}, {chromeVersion}, {nodeVersion}, {locale}
+   */
+  userAgent: '{productToken}/{version} ({osName} {osVersion}; {arch}) Electron/{electronVersion}',
   /** Agent identifier sent to the daemon's knowledge / Apollo APIs. */
   agentId: 'legion-interlink',
   /** Mastra memory resource ID. */
@@ -56,6 +62,18 @@ export const branding = {
   artifactPrefix: 'Legion-Interlink',
   /** macOS app category. */
   macCategory: 'public.app-category.developer-tools',
+
+  // ── Theme / visual identity ──────────────────────────────────────────
+  /** OKLCh hue angle (0-360) used for the brand accent across the UI. */
+  themeHue: '292',
+  /** Fallback light-mode accent for contexts that need a hex color. */
+  themeAccentLight: '#7f77dd',
+  /** Fallback dark-mode accent for contexts that need a hex color. */
+  themeAccentDark: '#c5c2f5',
+  /** Empty-thread background treatment. */
+  themeBackground: 'matrix-rain',
+  /** Whether to use the animated gradient wordmark text. */
+  themeGradientText: 'true',
 
   // ── macOS permission-usage strings (shown in system dialogs) ──────────
   microphoneUsage:

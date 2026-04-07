@@ -4,6 +4,7 @@ import type {
   ComputerEnvironmentMetadata,
   ComputerUseCursorState,
 } from '../../../shared/computer-use.js';
+import { withBrandUserAgent } from '../../utils/user-agent.js';
 
 /**
  * Remote VM protocol (HTTP polling variant):
@@ -365,9 +366,9 @@ export class VmHttpClient {
     return withAbortTimeout(timeoutMs, signal, async (combinedSignal) => {
       const response = await fetch(url, {
         method,
-        headers: {
+        headers: withBrandUserAgent({
           'content-type': 'application/json',
-        },
+        }),
         body: body == null ? undefined : JSON.stringify(body),
         signal: combinedSignal,
       });

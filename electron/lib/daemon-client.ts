@@ -2,6 +2,7 @@ import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { createHmac, randomUUID } from 'crypto';
 import type { AppConfig } from '../config/schema.js';
+import { withBrandUserAgent } from '../utils/user-agent.js';
 
 export type DaemonResult<T = unknown> = { ok: boolean; data?: T; error?: string };
 
@@ -42,10 +43,10 @@ export function resolveAuthToken(config: AppConfig, appHome: string): string | n
 
 export function authHeaders(config: AppConfig, appHome: string): Record<string, string> {
   const token = resolveAuthToken(config, appHome);
-  return {
+  return withBrandUserAgent({
     'accept': 'application/json',
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  };
+  });
 }
 
 export function withTimeout(ms = DAEMON_TIMEOUT_MS): { signal: AbortSignal } {

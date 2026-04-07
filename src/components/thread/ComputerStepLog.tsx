@@ -147,12 +147,12 @@ const ScreenshotThumbnail: FC<{
               key={df.displayIndex}
               type="button"
               onClick={(e) => { e.stopPropagation(); setSelectedDisplayIndex(df.displayIndex); }}
-              className={`relative overflow-hidden rounded border transition-all ${df.displayIndex === activeDisplayIndex ? 'border-purple-400/60 ring-1 ring-purple-400/30' : 'border-border/30 opacity-60 hover:opacity-80 hover:border-border/50'}`}
+              className={`relative overflow-hidden rounded border transition-all ${df.displayIndex === activeDisplayIndex ? 'border-primary/60 ring-1 ring-primary/30' : 'border-border/30 opacity-60 hover:opacity-80 hover:border-border/50'}`}
               style={{ flex: `0 0 ${Math.min(50, 100 / displayFrames.length)}%` }}
             >
               <img src={df.dataUrl} alt={df.displayName} className="block w-full max-h-[60px] object-contain bg-black/40" />
               <div className="absolute bottom-0 left-0 right-0 bg-black/60 px-1 py-0.5 text-[8px] text-white/60 truncate">
-                {df.displayIndex === (actionDisplayIndex ?? 0) && <span className="text-purple-300 mr-0.5">&#9654;</span>}
+                {df.displayIndex === (actionDisplayIndex ?? 0) && <span className="text-primary mr-0.5">&#9654;</span>}
                 {df.displayName}
               </div>
             </button>
@@ -176,24 +176,29 @@ const ScreenshotThumbnail: FC<{
           <>
             {/* Outer glow ring */}
             <div
-              className="pointer-events-none absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-purple-400/60 shadow-[0_0_8px_3px_rgba(168,85,247,0.25)]"
+              className="pointer-events-none absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2"
               style={{
                 left: `${(cursorX / displayWidth) * 100}%`,
                 top: `${(cursorY / displayHeight) * 100}%`,
+                borderColor: 'var(--app-cursor-ring)',
+                boxShadow: '0 0 8px 3px var(--app-cursor-ring)',
               }}
             />
             {/* Inner dot */}
             <div
-              className="pointer-events-none absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-purple-500/70 border border-purple-300/80"
+              className="pointer-events-none absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full"
               style={{
                 left: `${(cursorX / displayWidth) * 100}%`,
                 top: `${(cursorY / displayHeight) * 100}%`,
+                backgroundColor: 'var(--app-cursor-fill)',
+                borderColor: 'var(--app-cursor-ring-border)',
+                borderWidth: '1px',
               }}
             />
             {/* Drag end indicator */}
             {hasDragEnd && (
               <div
-                className="pointer-events-none absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-dashed border-purple-400/40"
+                className="pointer-events-none absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-dashed border-primary/40"
                 style={{
                   left: `${(dragEndX / displayWidth) * 100}%`,
                   top: `${(dragEndY / displayHeight) * 100}%`,

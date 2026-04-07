@@ -489,6 +489,10 @@ export const appConfigSchema = z.object({
   ui: z.object({
     theme: z.enum(['light', 'dark', 'system']),
     sidebarWidth: z.number().positive(),
+    brandHue: z.number().min(0).max(360).optional(),
+    brandAccent: z.string().optional(),
+    background: z.enum(['matrix-rain', 'gradient', 'none']).optional(),
+    gradientText: z.boolean().optional(),
   }),
   audio: audioConfigSchema,
   realtime: realtimeConfigSchema,

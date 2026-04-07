@@ -8,6 +8,7 @@ import { app } from '@/lib/ipc-client';
 import { useAttachments } from './AttachmentContext';
 import { useConfig } from './ConfigProvider';
 import { createUnifiedSpeechAdapter, createUnifiedDictationAdapter, type AudioProvider } from '@/lib/audio/speech-adapters';
+import { buildResponseTiming, getResponseTiming, withResponseTiming } from '@/lib/response-timing';
 
 export type DebateEnrichment = {
   enabled: boolean;
@@ -111,6 +112,7 @@ export type ConversationRecord = {
   selectedProfileKey?: string | null;
   fallbackEnabled?: boolean;
   profilePrimaryModelKey?: string | null;
+  currentWorkingDirectory?: string | null;
   // Sub-agent metadata
   parentConversationId?: string | null;
   parentToolCallId?: string | null;
@@ -131,6 +133,16 @@ export type SubAgentThreadState = {
   messages: StoredMessage[];
   headId: string | null;
   depth: number;
+};
+
+type PendingAssistantTiming = {
+  startedAt: string;
+};
+
+type MessageAccumulator = {
+  messages: StoredMessage[];
+  headId: string | null;
+  pendingAssistantTiming?: PendingAssistantTiming | null;
 };
 
 function nowIso(): string {
@@ -211,6 +223,18 @@ function deriveFallbackTitle(messages: ThreadMessageLike[]): string | null {
   ) || null;
 }
 
+function extractPromptHistoryText(message: ThreadMessageLike): string | null {
+  if (message.role !== 'user' || !Array.isArray(message.content)) return null;
+
+  const text = message.content
+    .filter((part: unknown) => (part as { type?: string }).type === 'text')
+    .map((part: unknown) => (part as { text?: string }).text ?? '')
+    .filter((part) => !part.startsWith('\n\n--- File:') && !part.startsWith('\n[Attached file:'))
+    .join('');
+
+  return text.trim() ? text : null;
+}
+
 // --- Message tree helpers ---
 
 /** Walk from a leaf message up to the root, returning the active branch (reversed to chronological order) */
@@ -227,9 +251,6 @@ function getActiveBranch(tree: StoredMessage[], headId: string | null): StoredMe
   }
   return branch;
 }
-
-// Branch navigation context
-import { createContext, useContext } from 'react';
 
 // Sub-agent context
 type SubAgentActions = {
@@ -263,45 +284,140 @@ type BranchNav = {
   goToNext: () => void;
 };
 
-const BranchNavContext = createContext<BranchNav | null>(null);
+const BranchNavContext = createCtx<BranchNav | null>(null);
 
 export function useBranchNav(): BranchNav | null {
-  return useContext(BranchNavContext);
+  return useCtx(BranchNavContext);
+}
+
+type AssistantResponseTimingState = {
+  activeRunStartedAt: string | null;
+};
+
+const AssistantResponseTimingContext = createCtx<AssistantResponseTimingState>({
+  activeRunStartedAt: null,
+});
+
+export function useAssistantResponseTiming(): AssistantResponseTimingState {
+  return useCtx(AssistantResponseTimingContext);
+}
+
+type PromptHistoryState = {
+  conversationId: string | null;
+  prompts: string[];
+};
+
+const PromptHistoryContext = createCtx<PromptHistoryState>({
+  conversationId: null,
+  prompts: [],
+});
+
+export function usePromptHistory(): PromptHistoryState {
+  return useCtx(PromptHistoryContext);
+}
+
+type CurrentWorkingDirectoryState = {
+  currentWorkingDirectory: string | null;
+  setCurrentWorkingDirectory: (cwd: string | null) => Promise<void>;
+};
+
+const CurrentWorkingDirectoryContext = createCtx<CurrentWorkingDirectoryState>({
+  currentWorkingDirectory: null,
+  setCurrentWorkingDirectory: async () => {},
+});
+
+export function useCurrentWorkingDirectory(): CurrentWorkingDirectoryState {
+  return useCtx(CurrentWorkingDirectoryContext);
 }
 
 // --- Module-level sub-agent state (survives RuntimeProvider remounts) ---
 
 const globalSubAgentThreads = new Map<string, SubAgentThreadState>();
-const globalSubAgentAccumulators = new Map<string, { messages: StoredMessage[]; headId: string | null }>();
+const globalSubAgentAccumulators = new Map<string, MessageAccumulator>();
 let globalSubAgentVersion = 0; // bumped on every change to trigger re-renders
 
 // --- Stream accumulator functions ---
 
-const streamAccumulators = new Map<string, { messages: StoredMessage[]; headId: string | null }>();
+const streamAccumulators = new Map<string, MessageAccumulator>();
 /** Conversations where the next assistant message should be forced-new (after realtime call reconnect) */
 const forceNewAssistant = new Set<string>();
 
-function getOrCreateAssistantInAcc(acc: { messages: StoredMessage[]; headId: string | null }): { msg: StoredMessage; idx: number } {
+function createPendingAssistantTiming(startedAt = nowIso()): PendingAssistantTiming {
+  return { startedAt };
+}
+
+function getAccumulatorStartedAt(acc: MessageAccumulator | undefined): string | null {
+  if (!acc) return null;
+
+  if (acc.pendingAssistantTiming?.startedAt) {
+    return acc.pendingAssistantTiming.startedAt;
+  }
+
+  const branch = getActiveBranch(acc.messages, acc.headId);
+  const last = branch[branch.length - 1];
+  if (last?.role !== 'assistant') return null;
+
+  return getResponseTiming(last)?.startedAt ?? null;
+}
+
+function withPendingAssistantTiming(message: StoredMessage, acc: MessageAccumulator): StoredMessage {
+  const startedAt = acc.pendingAssistantTiming?.startedAt;
+  if (!startedAt) return message;
+  if (getResponseTiming(message)?.startedAt) return message;
+  return withResponseTiming(message, { startedAt });
+}
+
+function finalizeAssistantResponse(acc: MessageAccumulator, finishedAt = nowIso()): void {
+  const branch = getActiveBranch(acc.messages, acc.headId);
+  const last = branch[branch.length - 1];
+
+  if (last?.role !== 'assistant') {
+    acc.pendingAssistantTiming = null;
+    return;
+  }
+
+  const startedAt = getResponseTiming(last)?.startedAt ?? acc.pendingAssistantTiming?.startedAt;
+  if (!startedAt) {
+    acc.pendingAssistantTiming = null;
+    return;
+  }
+
+  const idx = acc.messages.findIndex((m) => m.id === last.id);
+  if (idx < 0) {
+    acc.pendingAssistantTiming = null;
+    return;
+  }
+
+  acc.messages[idx] = withResponseTiming(acc.messages[idx], buildResponseTiming(startedAt, finishedAt));
+  acc.pendingAssistantTiming = null;
+}
+
+function getOrCreateAssistantInAcc(acc: MessageAccumulator): { msg: StoredMessage; idx: number } {
   const branch = getActiveBranch(acc.messages, acc.headId);
   const last = branch[branch.length - 1];
   if (last?.role === 'assistant') {
     const idx = acc.messages.findIndex((m) => m.id === last.id);
-    return { msg: last, idx };
+    const timed = withPendingAssistantTiming(last, acc);
+    if (timed !== last && idx >= 0) {
+      acc.messages[idx] = timed;
+    }
+    return { msg: timed, idx };
   }
   // Create new assistant message
-  const newMsg: StoredMessage = {
+  const baseMsg: StoredMessage = {
     id: msgId(),
     parentId: acc.headId,
     role: 'assistant',
     content: [],
     createdAt: new Date(),
   };
+  const newMsg = withPendingAssistantTiming(baseMsg, acc);
   acc.messages.push(newMsg);
   acc.headId = newMsg.id;
   return { msg: newMsg, idx: acc.messages.length - 1 };
 }
 
-function applyTextDelta(acc: { messages: StoredMessage[]; headId: string | null }, text: string): void {
+function applyTextDelta(acc: MessageAccumulator, text: string): void {
   const { msg, idx } = getOrCreateAssistantInAcc(acc);
   const content = (Array.isArray(msg.content) ? [...msg.content] : []) as ContentPart[];
   const lastPart = content[content.length - 1];
@@ -314,7 +430,7 @@ function applyTextDelta(acc: { messages: StoredMessage[]; headId: string | null 
   acc.messages[idx] = { ...msg, content: toStoredContent(content) };
 }
 
-function applyObserverMessage(acc: { messages: StoredMessage[]; headId: string | null }, text: string): void {
+function applyObserverMessage(acc: MessageAccumulator, text: string): void {
   const { msg, idx } = getOrCreateAssistantInAcc(acc);
   const content = (Array.isArray(msg.content) ? [...msg.content] : []) as ContentPart[];
   const normalized = text.trim();
@@ -328,7 +444,7 @@ function applyObserverMessage(acc: { messages: StoredMessage[]; headId: string |
 }
 
 function applyToolCall(
-  acc: { messages: StoredMessage[]; headId: string | null },
+  acc: MessageAccumulator,
   e: { toolCallId: string; toolName: string; args: unknown; startedAt?: string },
 ): void {
   const { msg, idx } = getOrCreateAssistantInAcc(acc);
@@ -366,7 +482,7 @@ function applyToolCall(
 }
 
 function applyToolProgress(
-  acc: { messages: StoredMessage[]; headId: string | null },
+  acc: MessageAccumulator,
   e: {
     toolCallId?: string;
     toolName?: string;
@@ -433,7 +549,7 @@ function applyToolProgress(
 }
 
 function applyToolCompaction(
-  acc: { messages: StoredMessage[]; headId: string | null },
+  acc: MessageAccumulator,
   e: {
     toolCallId?: string;
     toolName?: string;
@@ -519,7 +635,7 @@ function applyToolCompaction(
 }
 
 function applyToolResult(
-  acc: { messages: StoredMessage[]; headId: string | null },
+  acc: MessageAccumulator,
   e: {
     toolCallId?: string;
     toolName?: string;
@@ -603,7 +719,7 @@ function applyToolResult(
   acc.messages[idx] = { ...msg, content: toStoredContent(content) };
 }
 
-function applyTokenUsage(acc: { messages: StoredMessage[]; headId: string | null }, usage: TokenUsageData): void {
+function applyTokenUsage(acc: MessageAccumulator, usage: TokenUsageData): void {
   const branch = getActiveBranch(acc.messages, acc.headId);
   const last = branch[branch.length - 1];
   if (!last || last.role !== 'assistant') return;
@@ -612,7 +728,7 @@ function applyTokenUsage(acc: { messages: StoredMessage[]; headId: string | null
   acc.messages[idx] = { ...acc.messages[idx], tokenUsage: usage };
 }
 
-function applyError(acc: { messages: StoredMessage[]; headId: string | null }, error: string): void {
+function applyError(acc: MessageAccumulator, error: string): void {
   const { msg, idx } = getOrCreateAssistantInAcc(acc);
   const content = (Array.isArray(msg.content) ? [...msg.content] : []) as ContentPart[];
   content.push({ type: 'text', text: `\n\n**Error:** ${error}` });
@@ -620,7 +736,7 @@ function applyError(acc: { messages: StoredMessage[]; headId: string | null }, e
 }
 
 function applyEnrichments(
-  acc: { messages: StoredMessage[]; headId: string | null },
+  acc: MessageAccumulator,
   data: Record<string, unknown>,
 ): void {
   // Normalize daemon enrichment payload — supports both flat keys and nested
@@ -669,7 +785,7 @@ function applyEnrichments(
   acc.messages[idx] = { ...msg, content: toStoredContent(content) };
 }
 
-function discardTrailingAssistant(acc: { messages: StoredMessage[]; headId: string | null }): void {
+function discardTrailingAssistant(acc: MessageAccumulator): void {
   const branch = getActiveBranch(acc.messages, acc.headId);
   const last = branch[branch.length - 1];
   if (last?.role !== 'assistant') return;
@@ -860,11 +976,13 @@ export function RuntimeProvider({
   const [headId, setHeadId] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [currentWorkingDirectory, setCurrentWorkingDirectoryState] = useState<string | null>(null);
   const [fallbackBanner, setFallbackBanner] = useState<FallbackBannerState>(null);
   const fallbackBannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeIdRef = useRef<string | null>(null);
   const treeRef = useRef<StoredMessage[]>([]);
   const headIdRef = useRef<string | null>(null);
+  const currentWorkingDirectoryRef = useRef<string | null>(null);
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const backendModeRef = useRef<'mastra' | 'legion-daemon'>('mastra');
   const onModelFallbackRef = useRef(onModelFallback);
@@ -958,9 +1076,14 @@ export function RuntimeProvider({
   useEffect(() => { activeIdRef.current = activeConversationId; }, [activeConversationId]);
   useEffect(() => { treeRef.current = tree; }, [tree]);
   useEffect(() => { headIdRef.current = headId; }, [headId]);
+  useEffect(() => { currentWorkingDirectoryRef.current = currentWorkingDirectory; }, [currentWorkingDirectory]);
 
   // Derive active branch from tree
   const activeBranch = useMemo(() => getActiveBranch(tree, headId), [tree, headId]);
+  const activeRunStartedAt = useMemo(() => {
+    if (!activeConversationId || !isRunning) return null;
+    return getAccumulatorStartedAt(streamAccumulators.get(activeConversationId));
+  }, [activeConversationId, isRunning, tree, headId]);
 
   // Track siblings for branch picking — only when not streaming to avoid transient wrong counts
   const branchInfo = useMemo(() => {
@@ -998,6 +1121,8 @@ export function RuntimeProvider({
     setActiveConversationId(id);
     setTree(t);
     setHeadId(h);
+    currentWorkingDirectoryRef.current = conv.currentWorkingDirectory ?? null;
+    setCurrentWorkingDirectoryState(conv.currentWorkingDirectory ?? null);
 
     const hasActiveStream = streamAccumulators.has(id);
     setIsRunning(hasActiveStream);
@@ -1044,12 +1169,15 @@ export function RuntimeProvider({
           messageCount: 0, userMessageCount: 0,
           runStatus: 'idle', hasUnread: false, lastAssistantUpdateAt: null,
           selectedModelKey: null,
+          currentWorkingDirectory: null,
           backendMode: detectedBackend,
         } as ConversationRecord);
         await app.conversations.setActiveId(newId);
         setActiveConversationId(newId);
         setTree([]);
         setHeadId(null);
+        currentWorkingDirectoryRef.current = null;
+        setCurrentWorkingDirectoryState(null);
       } catch (err) {
         console.error('[Runtime] Failed to load conversation:', err);
       }
@@ -1065,6 +1193,19 @@ export function RuntimeProvider({
   const schedulePersist = useCallback((conversationId: string, t: StoredMessage[], h: string | null, extra: Partial<ConversationRecord> = {}) => {
     if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
     persistTimerRef.current = setTimeout(() => { persistConversation(conversationId, t, h, extra); }, 300);
+  }, []);
+
+  const setCurrentWorkingDirectory = useCallback(async (cwd: string | null) => {
+    const trimmed = cwd?.trim() ? cwd.trim() : null;
+    currentWorkingDirectoryRef.current = trimmed;
+    setCurrentWorkingDirectoryState(trimmed);
+
+    const convId = activeIdRef.current;
+    if (!convId) return;
+
+    await persistConversation(convId, treeRef.current, headIdRef.current, {
+      currentWorkingDirectory: trimmed,
+    });
   }, []);
 
   // Stable ref for values the stream handler needs without re-subscribing
@@ -1294,6 +1435,7 @@ export function RuntimeProvider({
         // so the new call starts with a clean slate — prevents the new greeting
         // from merging into the previous call's last assistant message.
         if (rtStatus === 'connected' && acc.messages.length > 0) {
+          finalizeAssistantResponse(acc);
           if (persistTimerRef.current) { clearTimeout(persistTimerRef.current); persistTimerRef.current = null; }
           streamAccumulators.delete(convId);
           forceNewAssistant.add(convId);
@@ -1409,6 +1551,7 @@ export function RuntimeProvider({
           }
         }
       } else if (e.type === 'error') {
+        finalizeAssistantResponse(acc);
         if (persistTimerRef.current) { clearTimeout(persistTimerRef.current); persistTimerRef.current = null; }
         streamAccumulators.delete(convId);
         persistConversation(convId, acc.messages, acc.headId, {
@@ -1421,6 +1564,7 @@ export function RuntimeProvider({
         }
         return;
       } else if (e.type === 'done') {
+        finalizeAssistantResponse(acc);
         if (persistTimerRef.current) { clearTimeout(persistTimerRef.current); persistTimerRef.current = null; }
         streamAccumulators.delete(convId);
         persistConversation(convId, acc.messages, acc.headId, {
@@ -1505,6 +1649,7 @@ export function RuntimeProvider({
     if (!convId) return;
 
     const pendingAttachments = consumeAttachments();
+    const cwd = currentWorkingDirectoryRef.current;
     const userContent: ContentPart[] = [];
     for (const part of message.content) {
       if (part.type === 'text') userContent.push({ type: 'text', text: part.text });
@@ -1513,6 +1658,7 @@ export function RuntimeProvider({
     for (const att of pendingAttachments) {
       if (att.isImage) {
         userContent.push({ type: 'image', image: att.dataUrl });
+        userContent.push({ type: 'text', text: `\n[Attached image: ${att.name}]` });
       } else if (att.text) {
         userContent.push({ type: 'file', data: att.dataUrl, mimeType: att.mime, filename: att.name });
         userContent.push({ type: 'text', text: `\n\n--- File: ${att.name} ---\n${att.text}\n--- End File ---\n` });
@@ -1526,17 +1672,18 @@ export function RuntimeProvider({
     const userMsg: StoredMessage = { id: msgId(), parentId: headId, role: 'user', content: toStoredContent(userContent), createdAt: new Date() };
     const newTree = [...tree, userMsg];
     const newHead = userMsg.id;
+    const pendingAssistantTiming = createPendingAssistantTiming();
     setTree(newTree);
     setHeadId(newHead);
     setIsRunning(true);
 
-    streamAccumulators.set(convId, { messages: [...newTree], headId: newHead });
+    streamAccumulators.set(convId, { messages: [...newTree], headId: newHead, pendingAssistantTiming });
     const branch = getActiveBranch(newTree, newHead);
     await persistConversation(convId, newTree, newHead, { runStatus: 'running' });
     void maybeGenerateTitle(convId, branch);
     console.info(`[UI:stream] Firing agent:stream conv=${convId} model=${selectedModelKey ?? 'default'} reasoning=${reasoningEffort ?? 'medium'} messageCount=${branch.length} roles=${branch.map((m) => m.role).join(',')}`);
     console.info('[UI:stream] Last message preview:', branch.length > 0 ? JSON.stringify(branch[branch.length - 1]).slice(0, 500) : '(empty)');
-    app.agent.stream(convId, branch, selectedModelKey ?? undefined, reasoningEffort ?? 'medium', selectedProfileKey ?? undefined, fallbackEnabled ?? false);
+    app.agent.stream(convId, branch, selectedModelKey ?? undefined, reasoningEffort ?? 'medium', selectedProfileKey ?? undefined, fallbackEnabled ?? false, cwd ?? undefined);
   }, [tree, headId, selectedModelKey, reasoningEffort, selectedProfileKey, fallbackEnabled, consumeAttachments]);
 
   const onReload = useCallback(async (parentId: string | null) => {
@@ -1559,11 +1706,23 @@ export function RuntimeProvider({
     setIsRunning(true);
 
     const newTree = [...tree]; // keep all existing messages (old branches preserved)
-    streamAccumulators.set(convId, { messages: newTree, headId: actualParent });
+    streamAccumulators.set(convId, {
+      messages: newTree,
+      headId: actualParent,
+      pendingAssistantTiming: createPendingAssistantTiming(),
+    });
     const branch = getActiveBranch(newTree, actualParent);
     persistConversation(convId, newTree, actualParent, { runStatus: 'running' });
     console.info(`[UI:stream:reload] Firing agent:stream conv=${convId} model=${selectedModelKey ?? 'default'} reasoning=${reasoningEffort ?? 'medium'} messageCount=${branch.length} roles=${branch.map((m) => m.role).join(',')}`);
-    app.agent.stream(convId, branch, selectedModelKey ?? undefined, reasoningEffort ?? 'medium', selectedProfileKey ?? undefined, fallbackEnabled ?? false);
+    app.agent.stream(
+      convId,
+      branch,
+      selectedModelKey ?? undefined,
+      reasoningEffort ?? 'medium',
+      selectedProfileKey ?? undefined,
+      fallbackEnabled ?? false,
+      currentWorkingDirectoryRef.current ?? undefined,
+    );
   }, [tree, headId, selectedModelKey, reasoningEffort, selectedProfileKey, fallbackEnabled]);
 
   const onCancel = useCallback(async () => {
@@ -1576,6 +1735,9 @@ export function RuntimeProvider({
 
     // Clean up accumulator first — use its state if it has more recent data
     const acc = streamAccumulators.get(convId);
+    const finishedAt = nowIso();
+    const pendingStartedAt = acc?.pendingAssistantTiming?.startedAt;
+    if (acc) finalizeAssistantResponse(acc, finishedAt);
     streamAccumulators.delete(convId);
     const latestTree = acc ? acc.messages : currentTree;
     const latestHead = acc ? acc.headId : currentHeadId;
@@ -1584,13 +1746,16 @@ export function RuntimeProvider({
     // Insert a placeholder so the cancelled state is visible with a retry button.
     const headMsg = latestTree.find((m) => m.id === latestHead);
     if (headMsg?.role === 'user') {
-      const cancelledMsg: StoredMessage = {
+      const cancelledMsgBase: StoredMessage = {
         id: msgId(),
         parentId: latestHead,
         role: 'assistant',
         content: [],
         createdAt: new Date(),
       };
+      const cancelledMsg = pendingStartedAt
+        ? withResponseTiming(cancelledMsgBase, buildResponseTiming(pendingStartedAt, finishedAt))
+        : cancelledMsgBase;
       const newTree = [...latestTree, cancelledMsg];
       const newHead = cancelledMsg.id;
       setTree(newTree);
@@ -1648,6 +1813,21 @@ export function RuntimeProvider({
   const branchNav: BranchNav | null = branchInfo && branchInfo.total > 1
     ? { total: branchInfo.total, current: branchInfo.currentIdx + 1, goToPrevious: goToPreviousBranch, goToNext: goToNextBranch }
     : null;
+
+  const assistantResponseTiming = useMemo<AssistantResponseTimingState>(() => ({
+    activeRunStartedAt,
+  }), [activeRunStartedAt]);
+  const promptHistory = useMemo<PromptHistoryState>(() => ({
+    conversationId: activeConversationId,
+    prompts: [...activeBranch]
+      .reverse()
+      .map((message) => extractPromptHistoryText(message))
+      .filter((message): message is string => Boolean(message)),
+  }), [activeBranch, activeConversationId]);
+  const currentWorkingDirectoryState = useMemo<CurrentWorkingDirectoryState>(() => ({
+    currentWorkingDirectory,
+    setCurrentWorkingDirectory,
+  }), [currentWorkingDirectory, setCurrentWorkingDirectory]);
 
   // Sub-agent actions
   const sendSubAgentMessage = useCallback(async (subAgentConversationId: string, text: string) => {
@@ -1738,9 +1918,15 @@ export function RuntimeProvider({
     <FallbackBannerContext.Provider value={fallbackBannerActions}>
       <SubAgentContext.Provider value={subAgentActions}>
         <BranchNavContext.Provider value={branchNav}>
-          <AssistantRuntimeProvider runtime={runtime}>
-            {children}
-          </AssistantRuntimeProvider>
+          <AssistantResponseTimingContext.Provider value={assistantResponseTiming}>
+            <PromptHistoryContext.Provider value={promptHistory}>
+              <CurrentWorkingDirectoryContext.Provider value={currentWorkingDirectoryState}>
+                <AssistantRuntimeProvider runtime={runtime}>
+                  {children}
+                </AssistantRuntimeProvider>
+              </CurrentWorkingDirectoryContext.Provider>
+            </PromptHistoryContext.Provider>
+          </AssistantResponseTimingContext.Provider>
         </BranchNavContext.Provider>
       </SubAgentContext.Provider>
     </FallbackBannerContext.Provider>

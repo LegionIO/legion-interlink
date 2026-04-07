@@ -19,6 +19,7 @@ import type { ToolDefinition } from '../tools/types.js';
 import type { ComputerUseEvent } from '../../shared/computer-use.js';
 import { getExistingComputerUseManager } from '../computer-use/service.js';
 import type { IncomingMessage } from 'http';
+import { withBrandUserAgent } from '../utils/user-agent.js';
 
 /* ── Types ── */
 
@@ -385,10 +386,10 @@ export class RealtimeSession {
       if (!apiKey) throw new Error('OpenAI API key not configured for realtime');
       return {
         url: `wss://api.openai.com/v1/realtime?model=${encodeURIComponent(model)}`,
-        headers: {
+        headers: withBrandUserAgent({
           'Authorization': `Bearer ${apiKey}`,
           'OpenAI-Beta': 'realtime=v1',
-        },
+        }),
       };
     }
 
@@ -406,9 +407,9 @@ export class RealtimeSession {
       console.info(`[RealtimeSession] Azure WebSocket URL: ${url}`);
       return {
         url,
-        headers: {
+        headers: withBrandUserAgent({
           'api-key': azureCfg.apiKey,
-        },
+        }),
       };
     }
 
@@ -426,7 +427,7 @@ export class RealtimeSession {
         wsUrl = `ws://${baseUrl}`; // no protocol — assume ws://
       }
       const separator = wsUrl.includes('?') ? '&' : '?';
-      const headers: Record<string, string> = {};
+      const headers = withBrandUserAgent();
       if (customCfg.apiKey) {
         headers['Authorization'] = `Bearer ${customCfg.apiKey}`;
       }

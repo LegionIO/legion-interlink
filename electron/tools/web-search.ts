@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { ToolDefinition } from './types.js';
+import { withBrandUserAgent } from '../utils/user-agent.js';
 
 export const webSearchTool: ToolDefinition = {
   name: 'web_search',
@@ -13,7 +14,7 @@ export const webSearchTool: ToolDefinition = {
     try {
       const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
       const resp = await fetch(url, {
-        headers: { 'User-Agent': __BRAND_USER_AGENT },
+        headers: withBrandUserAgent(),
         signal: AbortSignal.timeout(10000),
       });
       if (!resp.ok) return { error: `HTTP ${resp.status}` };

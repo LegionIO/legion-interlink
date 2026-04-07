@@ -81,19 +81,19 @@ const CursorIndicator: FC<{
     <>
       {/* Outer glow ring */}
       <div
-        className="pointer-events-none absolute h-10 w-10 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-purple-400/80 shadow-[0_0_16px_6px_rgba(168,85,247,0.40)] transition-[left,top] duration-300 ease-out"
-        style={{ left: `${left}px`, top: `${top}px` }}
+        className="pointer-events-none absolute h-10 w-10 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 transition-[left,top] duration-300 ease-out"
+        style={{ left: `${left}px`, top: `${top}px`, borderColor: 'var(--app-cursor-ring)', boxShadow: '0 0 16px 6px var(--app-cursor-ring)' }}
       />
       {/* Inner filled dot */}
       <div
-        className="pointer-events-none absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full bg-purple-500/80 border border-purple-300/80 transition-[left,top] duration-300 ease-out"
-        style={{ left: `${left}px`, top: `${top}px` }}
+        className="pointer-events-none absolute h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border transition-[left,top] duration-300 ease-out"
+        style={{ left: `${left}px`, top: `${top}px`, backgroundColor: 'var(--app-cursor-fill)', borderColor: 'var(--app-cursor-ring-border)' }}
       />
       {/* Click ripple */}
       {clickedRecently && (
         <div
-          className="pointer-events-none absolute h-12 w-12 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-purple-400/80 animate-ping"
-          style={{ left: `${left}px`, top: `${top}px` }}
+          className="pointer-events-none absolute h-12 w-12 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 animate-ping"
+          style={{ left: `${left}px`, top: `${top}px`, borderColor: 'var(--app-cursor-ping)' }}
         />
       )}
     </>
@@ -148,7 +148,7 @@ export const OverlayContent: FC<{ state: ComputerOverlayState }> = ({ state }) =
                 : 'border-amber-400/80 bg-amber-950/80'
               : isFailed
                 ? 'border-red-400/80 bg-red-950/80'
-                : 'border-purple-400/80 bg-black/80 overlay-pulse-border'
+                : 'border-[var(--app-overlay-border)] bg-black/80 overlay-pulse-border'
             }
           `}
           onMouseEnter={isPaused ? handleBannerMouseEnter : undefined}
@@ -163,13 +163,13 @@ export const OverlayContent: FC<{ state: ComputerOverlayState }> = ({ state }) =
               ) : isFailed ? (
                 <AlertTriangle className="h-7 w-7 text-red-400" />
               ) : (
-                <Monitor className="h-7 w-7 text-purple-400 overlay-pulse-icon" />
+                <Monitor className="h-7 w-7 text-primary overlay-pulse-icon" />
               )}
             </div>
 
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                <span className="text-sm font-semibold text-purple-200 truncate">
+                <span className="text-sm font-semibold text-primary truncate">
                   {state.modelDisplayName}
                 </span>
                 <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
@@ -215,12 +215,12 @@ export const OverlayContent: FC<{ state: ComputerOverlayState }> = ({ state }) =
           {/* Goal + subgoal */}
           <div className="mt-2.5 space-y-1">
             <div className="flex items-start gap-1.5">
-              <Target className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-purple-400/60" />
+              <Target className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-primary/60" />
               <span className="text-[12px] leading-snug text-white/80">{state.goal}</span>
             </div>
             {state.currentSubgoal && (
               <div className="flex items-start gap-1.5 pl-[22px]">
-                <Zap className="mt-0.5 h-3 w-3 flex-shrink-0 text-purple-400/40" />
+                <Zap className="mt-0.5 h-3 w-3 flex-shrink-0 text-primary/40" />
                 <span className="text-[11px] leading-snug text-white/55">{state.currentSubgoal}</span>
               </div>
             )}
@@ -233,12 +233,12 @@ export const OverlayContent: FC<{ state: ComputerOverlayState }> = ({ state }) =
               <div className={`mt-2.5 flex items-center gap-2 rounded-lg border px-3 py-2 ${
                 isWarning
                   ? 'border-amber-400/30 bg-amber-500/10'
-                  : 'border-purple-400/30 bg-purple-500/10'
+                  : 'border-[var(--brand-accent-border)] bg-[var(--brand-accent-subtle)]'
               }`}>
                 {isWarning
                   ? <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0 text-amber-400" />
-                  : <Monitor className="h-3.5 w-3.5 flex-shrink-0 text-purple-400" />}
-                <span className={`text-[11px] font-medium ${isWarning ? 'text-amber-200' : 'text-purple-200'}`}>
+                  : <Monitor className="h-3.5 w-3.5 flex-shrink-0 text-primary" />}
+                <span className={`text-[11px] font-medium ${isWarning ? 'text-amber-200' : 'text-primary'}`}>
                   {state.statusMessage}
                 </span>
               </div>

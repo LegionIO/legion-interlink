@@ -9,6 +9,7 @@ import { buildScopedToolName, findToolByName } from './naming.js';
 import type { AppConfig } from '../config/schema.js';
 import { runCommandWithStreaming, resolveProcessStreamingConfig } from './process-runner.js';
 import { runToolExecution } from './execution.js';
+import { withBrandUserAgent } from '../utils/user-agent.js';
 
 /* ── Manifest types ── */
 
@@ -244,10 +245,10 @@ async function runHttpExecution(
   const url = interpolateTemplate(exec.url ?? '', input);
   const method = (exec.method ?? 'POST').toUpperCase();
 
-  const headers: Record<string, string> = {
+  const headers = withBrandUserAgent({
     'Content-Type': 'application/json',
     ...(exec.headers ?? {}),
-  };
+  });
   for (const [key, value] of Object.entries(headers)) {
     headers[key] = interpolateTemplate(value, input);
   }

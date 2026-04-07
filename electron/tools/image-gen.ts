@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { ToolDefinition } from './types.js';
 import type { AppConfig } from '../config/schema.js';
 import { resolveMediaGenEndpoint, saveMediaToFile, filePathToUrl } from './media-gen-utils.js';
+import { withBrandUserAgent } from '../utils/user-agent.js';
 
 export function createImageGenTool(getConfig: () => AppConfig, appHome: string): ToolDefinition {
   return {
@@ -80,7 +81,10 @@ export function createImageGenTool(getConfig: () => AppConfig, appHome: string):
           } else if (item.url) {
             // If the API returns a URL instead of base64, download and save it
             try {
-              const imgResponse = await fetch(item.url, { signal: AbortSignal.timeout(30000) });
+              const imgResponse = await fetch(item.url, {
+                headers: withBrandUserAgent(),
+                signal: AbortSignal.timeout(30000),
+              });
               if (imgResponse.ok) {
                 const buffer = Buffer.from(await imgResponse.arrayBuffer());
                 const filePath = saveMediaToFile(buffer, 'images', ext, appHome);

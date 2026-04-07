@@ -25,6 +25,7 @@ import { registerClipboardHandlers } from './ipc/clipboard.js';
 import { closeAllOverlayWindows } from './computer-use/overlay-window.js';
 import { registerTriggerDispatchHandlers, handleSseEvent } from './ipc/trigger-dispatch.js';
 import { registerGaiaThreadHandlers } from './ipc/gaia-thread.js';
+import { applyBrandUserAgent, withBrandUserAgent } from './utils/user-agent.js';
 
 const APP_HOME = join(homedir(), '.' + __BRAND_APP_SLUG);
 
@@ -182,6 +183,7 @@ function createWindow(): BrowserWindow {
       spellcheck: true,
     },
   });
+  applyBrandUserAgent(mainWindow.webContents);
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
@@ -221,7 +223,9 @@ function createWindow(): BrowserWindow {
               filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'] }],
             });
             if (!result.canceled && result.filePath) {
-              const resp = await net.fetch(params.srcURL);
+              const resp = await net.fetch(params.srcURL, {
+                headers: withBrandUserAgent(),
+              });
               if (resp.ok) {
                 const buffer = Buffer.from(await resp.arrayBuffer());
                 writeFileSync(result.filePath, buffer);
@@ -530,6 +534,22 @@ if (gotSingleInstanceLock) {
       return { canceled: false, files };
     });
 
+    ipcMain.handle('dialog:open-directory', async () => {
+      const win = BrowserWindow.getFocusedWindow();
+      if (!win) return { canceled: true };
+      const result = await dialog.showOpenDialog(win, {
+        properties: ['openDirectory'],
+      });
+      if (result.canceled || result.filePaths.length === 0) return { canceled: true };
+
+      const directoryPath = result.filePaths[0];
+      return {
+        canceled: false,
+        directoryPath,
+        name: directoryPath.split('/').pop() ?? directoryPath,
+      };
+    });
+
     // Directory picker handler — walks directory recursively and returns all file paths
     ipcMain.handle('dialog:open-directory-files', async () => {
       const win = BrowserWindow.getFocusedWindow();
@@ -558,7 +578,9 @@ if (gotSingleInstanceLock) {
     // Fetch image bytes from main process (bypasses CORS)
     ipcMain.handle('image:fetch', async (_event, url: string) => {
       try {
-        const resp = await net.fetch(url);
+        const resp = await net.fetch(url, {
+          headers: withBrandUserAgent(),
+        });
         if (!resp.ok) return { error: `HTTP ${resp.status}` };
         const buffer = Buffer.from(await resp.arrayBuffer());
         const mime = resp.headers.get('content-type') || 'image/png';
@@ -609,7 +631,9 @@ if (gotSingleInstanceLock) {
       if (result.canceled || !result.filePath) return { canceled: true };
 
       try {
-        const resp = await net.fetch(url);
+        const resp = await net.fetch(url, {
+          headers: withBrandUserAgent(),
+        });
         if (!resp.ok) return { error: `HTTP ${resp.status}` };
         const buffer = Buffer.from(await resp.arrayBuffer());
         writeFileSync(result.filePath, buffer);

@@ -54,7 +54,7 @@ export function createShellTool(getConfig: () => AppConfig): ToolDefinition {
         const streaming = resolveProcessStreamingConfig(config);
         const result = await runCommandWithStreaming({
           command,
-          cwd: cwd || process.env.HOME,
+          cwd: cwd || context.cwd || process.env.HOME,
           timeoutMs: timeout || config.tools.shell.timeout,
           env: { ...process.env },
           context,

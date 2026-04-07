@@ -464,7 +464,7 @@ export const ConversationList: FC<ConversationListProps> = ({
                       </span>
                     </div>
                     <div className="ml-1 flex shrink-0 flex-col items-center gap-1">
-                      {hasUnread && <div className="h-2 w-2 rounded-full bg-primary shadow-[0_0_10px_rgba(197,194,245,0.38)]" />}
+                      {hasUnread && <div className="h-2 w-2 rounded-full bg-primary app-unread-glow" />}
                       {isRunning && <TypingBubble />}
                       {computerStatus === 'running' && <ComputerActiveIndicator />}
                       {computerStatus === 'completed' && !(isActive && activeThreadMode === 'computer') && <ComputerCompletedIndicator />}

@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState, useCallback, type FC } from 'react';
+import { useState, useCallback, type FC } from 'react';
 import { CodeBlock } from './CodeBlock';
+import { ElapsedBadge } from './ElapsedBadge';
 import {
   ChevronDownIcon,
   ChevronRightIcon,
@@ -10,6 +11,7 @@ import {
   DownloadIcon,
 } from 'lucide-react';
 import { app } from '@/lib/ipc-client';
+import { formatElapsed } from '@/lib/response-timing';
 
 type ToolCallPart = {
   type: 'tool-call';
@@ -304,42 +306,14 @@ const ToolElapsedBadge: FC<{
   startedAt?: string;
   finishedAt?: string;
 }> = ({ isRunning, isError, startedAt, finishedAt }) => {
-  const fallbackStartedMsRef = useRef<number>(Date.now());
-  const [nowMs, setNowMs] = useState<number>(() => Date.now());
-  const [frozenEndMs, setFrozenEndMs] = useState<number | null>(null);
-
-  const startedMs = useMemo(
-    () => parseTimestampMs(startedAt) ?? fallbackStartedMsRef.current,
-    [startedAt],
-  );
-  const finishedMs = useMemo(() => parseTimestampMs(finishedAt), [finishedAt]);
-
-  useEffect(() => {
-    if (isRunning) {
-      setFrozenEndMs(null);
-      const tick = () => setNowMs(Date.now());
-      tick();
-      const interval = window.setInterval(tick, 100);
-      return () => window.clearInterval(interval);
-    }
-    if (finishedMs == null && frozenEndMs == null) {
-      setFrozenEndMs(Date.now());
-    }
-    return undefined;
-  }, [isRunning, finishedMs, frozenEndMs]);
-
-  const endMs = finishedMs ?? frozenEndMs ?? nowMs;
-  const elapsedMs = Math.max(0, endMs - startedMs);
-  const colorClasses = isRunning
-    ? 'border-blue-500/20 bg-blue-500/10 text-blue-600 dark:text-blue-400'
-    : isError
-      ? 'border-destructive/20 bg-destructive/10 text-destructive'
-      : 'border-green-500/20 bg-green-500/10 text-green-600 dark:text-green-400';
-
   return (
-    <span className={`ml-auto rounded-full border px-2 py-0.5 text-[10px] font-semibold tabular-nums ${colorClasses}`}>
-      {formatElapsed(elapsedMs)}
-    </span>
+    <ElapsedBadge
+      startedAt={startedAt}
+      finishedAt={finishedAt}
+      isRunning={isRunning}
+      isError={isError}
+      className="ml-auto"
+    />
   );
 };
 
@@ -425,23 +399,4 @@ function formatLiveOutput(output?: { stdout?: string; stderr?: string; truncated
   if (output.truncated) chunks.push('[output truncated]');
   if (output.stopped) chunks.push('[streaming stopped at max output]');
   return chunks.join('\n\n') || '[no output yet]';
-}
-
-function parseTimestampMs(value?: string): number | null {
-  if (!value) return null;
-  const ms = Date.parse(value);
-  return Number.isNaN(ms) ? null : ms;
-}
-
-function formatElapsed(ms: number): string {
-  if (ms < 1000) return `${Math.floor(ms)}ms`;
-
-  const totalSeconds = Math.floor(ms / 1000);
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-
-  if (hours > 0) return `${hours}h${minutes}m${seconds}s`;
-  if (minutes > 0) return `${minutes}m${seconds}s`;
-  return `${seconds}s`;
 }

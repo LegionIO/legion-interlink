@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, nativeImage, screen } from 'electron';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ComputerDisplayLayout, ComputerOverlayState } from '../../shared/computer-use.js';
+import { applyBrandUserAgent } from '../utils/user-agent.js';
 
 // Resolve the app icon once — same path as electron/main.ts
 const APP_ICON = join(__dirname, '../../build/icon.png');
@@ -122,6 +123,7 @@ function createSingleOverlay(
       sandbox: false,
     },
   });
+  applyBrandUserAgent(win.webContents);
 
   // Click-through so user can interact with the desktop underneath
   win.setIgnoreMouseEvents(true, { forward: true });

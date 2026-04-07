@@ -8,6 +8,7 @@ import type {
 } from '../../../shared/computer-use.js';
 import { makeComputerUseId, nowIso } from '../../../shared/computer-use.js';
 import type { ComputerHarness, ComputerHarnessActionContext, ComputerHarnessActionResult } from './shared.js';
+import { applyBrandUserAgent } from '../../utils/user-agent.js';
 
 const windows = new Map<string, BrowserWindow>();
 
@@ -73,6 +74,7 @@ function ensureWindow(sessionId: string): BrowserWindow {
       contextIsolation: true,
     },
   });
+  applyBrandUserAgent(win.webContents);
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   windows.set(sessionId, win);
   return win;

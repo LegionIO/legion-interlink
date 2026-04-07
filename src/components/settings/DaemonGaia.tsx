@@ -37,7 +37,7 @@ const modeConfig: Record<string, { color: string; bg: string; icon: typeof ZapIc
   dormant: { color: 'text-gray-400', bg: 'bg-gray-500/10', icon: PauseIcon },
   sentinel: { color: 'text-amber-400', bg: 'bg-amber-500/10', icon: EyeIcon },
   full_active: { color: 'text-emerald-400', bg: 'bg-emerald-500/10', icon: ZapIcon },
-  dormant_active: { color: 'text-purple-400', bg: 'bg-purple-500/10', icon: MoonIcon },
+  dormant_active: { color: 'text-primary', bg: 'bg-[var(--brand-accent-subtle)]', icon: MoonIcon },
 };
 
 function formatSecondsAgo(date: Date): string {
@@ -203,7 +203,7 @@ export const DaemonGaia: FC<SettingsProps> = () => {
               <span className="text-[10px]">Presence: {gate?.presence || '—'}</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <span className="h-1.5 w-1.5 rounded-full bg-purple-400" />
+              <span className="h-1.5 w-1.5 rounded-full bg-primary" />
               <span className="text-[10px]">Behavioral: {gate?.behavioral != null ? `${(gate.behavioral * 100).toFixed(0)}%` : '—'}</span>
             </div>
           </div>
@@ -213,7 +213,7 @@ export const DaemonGaia: FC<SettingsProps> = () => {
         <div className="rounded-lg border border-border/50 bg-card/30 p-3">
           <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Dream Cycle</p>
           <div className="mt-1 flex items-center gap-1.5">
-            <MoonIcon className={`h-3.5 w-3.5 ${dream?.active ? 'text-purple-400' : 'text-gray-500'}`} />
+            <MoonIcon className={`h-3.5 w-3.5 ${dream?.active ? 'text-primary' : 'text-gray-500'}`} />
             <span className="text-xs font-medium">{dream?.active ? 'Active' : 'Idle'}</span>
           </div>
           {dream?.last_run && <p className="text-[10px] text-muted-foreground">Last: {dream.last_run}</p>}

@@ -133,6 +133,16 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+function withWorkingDirectoryPrompt(basePrompt: string, cwd?: string): string {
+  if (!cwd) return basePrompt;
+
+  return [
+    basePrompt,
+    `Current working directory for this conversation: ${cwd}`,
+    'Use this directory as the default base path for shell and filesystem work unless the user explicitly chooses another path.',
+  ].filter(Boolean).join('\n\n');
+}
+
 function logToolCompactionDebug(stage: string, details: Record<string, unknown>): void {
   console.info(`[ToolCompactionDebug] ${stage} ${JSON.stringify(details)}`);
 }
@@ -223,6 +233,7 @@ export function registerAgentHandlers(ipcMain: IpcMain, appHome: string): void {
       reasoningEffort?: ReasoningEffort,
       profileKey?: string,
       fallbackEnabled?: boolean,
+      cwd?: string,
     ) => {
     // Cancel any existing stream for this conversation
     const existing = activeStreams.get(conversationId);
@@ -287,7 +298,7 @@ export function registerAgentHandlers(ipcMain: IpcMain, appHome: string): void {
           primaryModel: fallbackEntry,
           fallbackModels: [],
           fallbackEnabled: false,
-          systemPrompt: config.systemPrompt,
+          systemPrompt: withWorkingDirectoryPrompt(config.systemPrompt, cwd),
           temperature: config.advanced.temperature,
           maxSteps: config.advanced.maxSteps,
           maxRetries: config.advanced.maxRetries,
@@ -397,6 +408,7 @@ export function registerAgentHandlers(ipcMain: IpcMain, appHome: string): void {
             abortSignal: controller.signal,
             reasoningEffort,
             tools: toolSchemas,
+            cwd,
           });
 
           for await (const event of stream) {
@@ -955,7 +967,7 @@ export function registerAgentHandlers(ipcMain: IpcMain, appHome: string): void {
         // Apply profile system prompt override to config
         const configForStream: AppConfig = {
           ...config,
-          systemPrompt: streamConfig.systemPrompt,
+          systemPrompt: withWorkingDirectoryPrompt(streamConfig.systemPrompt, cwd),
           advanced: {
             ...config.advanced,
             temperature: streamConfig.temperature,
@@ -972,7 +984,7 @@ export function registerAgentHandlers(ipcMain: IpcMain, appHome: string): void {
               config,
               registeredTools,
               dbPath,
-              streamOptions,
+              { ...streamOptions, cwd },
             )
           : streamAgentResponse(
               conversationId,
@@ -981,7 +993,7 @@ export function registerAgentHandlers(ipcMain: IpcMain, appHome: string): void {
               configForStream,
               registeredTools,
               dbPath,
-              streamOptions,
+              { ...streamOptions, cwd },
             );
 
         for await (const event of stream) {

@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from 'fs/promises';
 import { dirname } from 'path';
 import type { ToolDefinition } from './types.js';
 import { runToolExecution, throwIfAborted } from './execution.js';
+import { resolveToolPath } from './path-utils.js';
 
 async function readIfExists(path: string): Promise<string> {
   try {
@@ -37,40 +38,41 @@ export function createFileWriteTool(): ToolDefinition {
           path: string; content: string; mode?: string;
           atLine?: number; startLine?: number; endLine?: number; createDirs?: boolean;
         };
+        const resolvedPath = resolveToolPath(path, context.cwd);
 
         if (createDirs) {
-          await mkdir(dirname(path), { recursive: true });
+          await mkdir(dirname(resolvedPath), { recursive: true });
         }
         throwIfAborted(signal);
 
         if (mode === 'overwrite') {
-          await writeFile(path, content, 'utf-8');
-          return { success: true, path, bytesWritten: Buffer.byteLength(content) };
+          await writeFile(resolvedPath, content, 'utf-8');
+          return { success: true, path: resolvedPath, bytesWritten: Buffer.byteLength(content) };
         }
 
         if (mode === 'append') {
-          const existing = await readIfExists(path);
-          await writeFile(path, existing + content, 'utf-8');
-          return { success: true, path, mode: 'append' };
+          const existing = await readIfExists(resolvedPath);
+          await writeFile(resolvedPath, existing + content, 'utf-8');
+          return { success: true, path: resolvedPath, mode: 'append' };
         }
 
         if (mode === 'insert_at_line' && typeof atLine === 'number') {
-          const existing = await readIfExists(path);
+          const existing = await readIfExists(resolvedPath);
           const lines = existing.split('\n');
           const insertIdx = Math.max(0, Math.min(lines.length, atLine - 1));
           lines.splice(insertIdx, 0, content);
-          await writeFile(path, lines.join('\n'), 'utf-8');
-          return { success: true, path, mode: 'insert_at_line', atLine: insertIdx + 1 };
+          await writeFile(resolvedPath, lines.join('\n'), 'utf-8');
+          return { success: true, path: resolvedPath, mode: 'insert_at_line', atLine: insertIdx + 1 };
         }
 
         if (mode === 'replace_lines' && typeof startLine === 'number' && typeof endLine === 'number') {
-          const existing = await readIfExists(path);
+          const existing = await readIfExists(resolvedPath);
           const lines = existing.split('\n');
           const start = Math.max(0, startLine - 1);
           const end = Math.min(lines.length, endLine);
           lines.splice(start, end - start, content);
-          await writeFile(path, lines.join('\n'), 'utf-8');
-          return { success: true, path, mode: 'replace_lines', replacedRange: `${startLine}-${endLine}` };
+          await writeFile(resolvedPath, lines.join('\n'), 'utf-8');
+          return { success: true, path: resolvedPath, mode: 'replace_lines', replacedRange: `${startLine}-${endLine}` };
         }
 
         return { error: 'Invalid write mode or missing parameters', isError: true };
@@ -97,8 +99,9 @@ export function createFileEditTool(): ToolDefinition {
         const { path, old_string, new_string, replace_all = false } = input as {
           path: string; old_string: string; new_string: string; replace_all?: boolean;
         };
+        const resolvedPath = resolveToolPath(path, context.cwd);
 
-        const content = await readFile(path, 'utf-8');
+        const content = await readFile(resolvedPath, 'utf-8');
         throwIfAborted(signal);
         const occurrences = content.split(old_string).length - 1;
 
@@ -111,8 +114,8 @@ export function createFileEditTool(): ToolDefinition {
           ? content.replaceAll(old_string, new_string)
           : content.replace(old_string, new_string);
 
-        await writeFile(path, updated, 'utf-8');
-        return { success: true, path, replacements: replace_all ? occurrences : 1 };
+        await writeFile(resolvedPath, updated, 'utf-8');
+        return { success: true, path: resolvedPath, replacements: replace_all ? occurrences : 1 };
       },
     }),
   };

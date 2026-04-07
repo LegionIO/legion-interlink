@@ -9,6 +9,9 @@ const stored = localStorage.getItem(__BRAND_APP_SLUG + '-theme') ?? 'system';
 const isDark = stored === 'dark' || (stored === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
 if (isDark) document.documentElement.classList.add('dark');
 
+// Apply initial brand hue before first paint (config-based override applied later by useThemeInjector)
+document.documentElement.style.setProperty('--brand-hue', __BRAND_THEME_HUE || '292');
+
 document.title = __BRAND_PRODUCT_NAME;
 
 const root = document.getElementById('root');
