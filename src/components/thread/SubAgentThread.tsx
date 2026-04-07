@@ -10,6 +10,8 @@ import {
 import { useSubAgents } from '@/providers/RuntimeProvider';
 import { MarkdownText } from './MarkdownText';
 import { ToolCallDisplay } from './ToolGroup';
+import { RichChatInput } from './RichChatInput';
+import { UserCodeMarkdown } from './UserCodeMarkdown';
 
 type SubAgentThreadProps = {
   subAgentConversationId: string;
@@ -91,25 +93,24 @@ export const SubAgentThread: FC<SubAgentThreadProps> = ({ subAgentConversationId
       {/* Composer — always visible so user can resume conversation after completion */}
       <div className="border-t p-4">
         <div className="flex items-end gap-2 rounded-2xl border bg-card px-3 py-2 shadow-sm">
-          <input
-            type="text"
+          <RichChatInput
             value={messageInput}
-            onChange={(e) => setMessageInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+            onChange={setMessageInput}
+            onSubmit={handleSend}
             placeholder={isRunning ? 'Message sub-agent...' : 'Resume conversation with sub-agent...'}
-            className="flex-1 min-h-[36px] py-1.5 text-sm bg-transparent outline-none"
+            className="min-h-[36px] max-h-[180px] flex-1 py-1.5 text-sm bg-transparent outline-none"
             autoFocus
           />
-            <button
-              type="button"
-              onClick={handleSend}
-              disabled={!messageInput.trim()}
-              className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-40 transition-colors shrink-0"
-            >
-              <SendHorizontalIcon className="h-4 w-4" />
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={handleSend}
+            disabled={!messageInput.trim()}
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-40 transition-colors shrink-0"
+          >
+            <SendHorizontalIcon className="h-4 w-4" />
+          </button>
         </div>
+      </div>
     </div>
   );
 };
@@ -194,8 +195,8 @@ const ChatBubble: FC<{ role: string; content: ContentPart[] }> = ({ role, conten
   } else if (source === 'task') {
     label = 'Task (from parent agent)';
     Icon = MonitorIcon;
-    iconColor = 'text-purple-400';
-    bubbleBg = 'bg-purple-500/10 border border-purple-500/20';
+    iconColor = 'text-primary';
+    bubbleBg = 'bg-[var(--brand-accent-subtle)] border border-[var(--brand-accent-border)]';
     align = 'justify-start';
   } else if (source === 'user') {
     label = 'You (direct message)';
@@ -223,7 +224,13 @@ const ChatBubble: FC<{ role: string; content: ContentPart[] }> = ({ role, conten
         <div className="space-y-1">
           {content.map((part, i) => {
             if (part.type === 'text' && part.text?.trim()) {
-              return <div key={i} className="text-sm"><MarkdownText text={part.text} /></div>;
+              return (
+                <div key={i} className="text-sm">
+                  {source === 'user'
+                    ? <UserCodeMarkdown text={part.text} className="text-sm" />
+                    : <MarkdownText text={part.text} />}
+                </div>
+              );
             }
             if (part.type === 'tool-call') {
               return (
