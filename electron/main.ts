@@ -26,6 +26,7 @@ import { closeAllOverlayWindows } from './computer-use/overlay-window.js';
 import { registerTriggerDispatchHandlers, handleSseEvent } from './ipc/trigger-dispatch.js';
 import { registerGaiaThreadHandlers } from './ipc/gaia-thread.js';
 import { applyBrandUserAgent, withBrandUserAgent } from './utils/user-agent.js';
+import { bootstrapSuperpowers } from './tools/superpowers-bootstrap.js';
 
 const APP_HOME = join(homedir(), '.' + __BRAND_APP_SLUG);
 
@@ -66,6 +67,13 @@ function ensureAppHome(): void {
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
     }
+  }
+
+  // Bootstrap superpowers skills (clone + generate skill.json wrappers on first launch)
+  try {
+    bootstrapSuperpowers(join(APP_HOME, 'skills'));
+  } catch (err) {
+    console.warn('[Main] Superpowers bootstrap failed (non-fatal):', err);
   }
 }
 

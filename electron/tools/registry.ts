@@ -24,6 +24,7 @@ import { webFetchTool } from './web-fetch.js';
 import { webSearchTool } from './web-search.js';
 import { createImageGenTool } from './image-gen.js';
 import { createVideoGenTool } from './video-gen.js';
+import { buildCliTools } from './cli-tools.js';
 import { z } from 'zod';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -175,6 +176,12 @@ export async function buildToolRegistry(getConfig: () => AppConfig, appHome?: st
   // Shell tool
   if (config?.tools?.shell?.enabled !== false) {
     tools.push(createShellTool(getConfig));
+  }
+
+  // CLI tools (gh/git, brew, wget, jq, tree, python, ollama, klist, jfrog)
+  // Only included if the binary exists on the system
+  if (config?.tools?.shell?.enabled !== false) {
+    tools.push(...buildCliTools(getConfig));
   }
 
   // File tools
