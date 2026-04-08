@@ -469,10 +469,16 @@ async function* consumeDaemonSSE(
         }
         // Extract token usage from the done payload and emit as a context-usage event
         // so RuntimeProvider can apply it to the message via applyTokenUsage.
-        const inputTokens = (payload.input_tokens ?? payload.inputTokens) as number | undefined;
-        const outputTokens = (payload.output_tokens ?? payload.outputTokens) as number | undefined;
-        const cacheReadTokens = (payload.cache_read_tokens ?? payload.cacheReadTokens) as number | undefined;
-        const cacheWriteTokens = (payload.cache_write_tokens ?? payload.cacheWriteTokens) as number | undefined;
+        // Use Number() coercion with Number.isFinite guard to handle string-encoded
+        // fields (common in JSON-over-SSE APIs) without relying on TypeScript casts.
+        const toCount = (v: unknown): number | undefined => {
+          const n = Number(v);
+          return Number.isFinite(n) ? n : undefined;
+        };
+        const inputTokens = toCount(payload.input_tokens ?? payload.inputTokens);
+        const outputTokens = toCount(payload.output_tokens ?? payload.outputTokens);
+        const cacheReadTokens = toCount(payload.cache_read_tokens ?? payload.cacheReadTokens);
+        const cacheWriteTokens = toCount(payload.cache_write_tokens ?? payload.cacheWriteTokens);
         if (inputTokens !== undefined || outputTokens !== undefined) {
           events.push({
             conversationId,
