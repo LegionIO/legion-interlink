@@ -1,6 +1,18 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.18] - 2026-04-07
+
+### Added
+- Server-computed `durationMs` for tool calls — eliminates 0ms display on sub-second tools
+- Token usage extraction from daemon `done` payload, emitted as `context-usage` event
+- `model-fallback` SSE event handling — model selector updates to reflect actual model used after pipeline fallback
+- `conversation_id` forwarded to daemon SSE requests
+
+### Changed
+- Tool timing prefers explicit `startedAt`/`finishedAt`/`durationMs` from daemon over generic timestamp field
+- Completed tools enforce minimum 1ms display instead of showing 0ms
+
+## [1.0.17]
 
 ### Added
 - 18 daemon IPC proxies for v1.7.0 endpoints (structural index, tool audit, state diff, session search, triggers CRUD, token budget, native dispatch, context curation)

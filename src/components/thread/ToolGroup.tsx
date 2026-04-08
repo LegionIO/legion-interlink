@@ -23,6 +23,7 @@ type ToolCallPart = {
   isError?: boolean;
   startedAt?: string;
   finishedAt?: string;
+  durationMs?: number;
   /** Original (pre-compaction) result — present when tool output was compacted */
   originalResult?: unknown;
   /** Tool compaction metadata */
@@ -89,6 +90,7 @@ export const ToolCallDisplay: FC<{ part: ToolCallPart }> = ({ part }) => {
           isError={Boolean(isError)}
           startedAt={part.startedAt}
           finishedAt={part.finishedAt}
+          durationMs={part.durationMs}
         />
         <ToolStatusIcon isRunning={isRunning} isError={isError} />
       </button>
@@ -305,11 +307,13 @@ const ToolElapsedBadge: FC<{
   isError: boolean;
   startedAt?: string;
   finishedAt?: string;
-}> = ({ isRunning, isError, startedAt, finishedAt }) => {
+  durationMs?: number;
+}> = ({ isRunning, isError, startedAt, finishedAt, durationMs }) => {
   return (
     <ElapsedBadge
       startedAt={startedAt}
       finishedAt={finishedAt}
+      durationMs={durationMs}
       isRunning={isRunning}
       isError={isError}
       className="ml-auto"

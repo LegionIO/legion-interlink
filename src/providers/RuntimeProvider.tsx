@@ -58,6 +58,8 @@ type ContentPart =
     isError?: boolean;
     startedAt?: string;
     finishedAt?: string;
+    /** Server-computed wall-clock duration in milliseconds — more accurate than finishedAt-startedAt for fast tools */
+    durationMs?: number;
     /** Original (pre-compaction) result content — present only when tool output was compacted */
     originalResult?: unknown;
     /** Tool compaction metadata — present only when tool output was compacted */
@@ -642,6 +644,7 @@ function applyToolResult(
     result: unknown;
     startedAt?: string;
     finishedAt?: string;
+    durationMs?: number;
     compaction?: {
       originalContent: string;
       wasCompacted: boolean;
@@ -703,6 +706,7 @@ function applyToolResult(
       result: e.result,
       startedAt: e.startedAt ?? existing.startedAt ?? finishedAt,
       finishedAt,
+      ...(e.durationMs !== undefined ? { durationMs: e.durationMs } : {}),
       ...(!e.compaction?.wasCompacted && existing.compactionPhase === 'start'
         ? { compactionPhase: existing.compactionMeta?.wasCompacted ? 'complete' as const : null }
         : {}),
@@ -1219,7 +1223,7 @@ export function RuntimeProvider({
         conversationId: string; type: string; text?: string;
         toolCallId?: string; toolName?: string; args?: unknown;
         result?: unknown; error?: string;
-        startedAt?: string; finishedAt?: string;
+        startedAt?: string; finishedAt?: string; durationMs?: number;
         compaction?: {
           originalContent: string;
           wasCompacted: boolean;
@@ -1308,7 +1312,7 @@ export function RuntimeProvider({
         } else if (e.type === 'tool-call' && e.toolCallId) {
           applyToolCall(saAcc, { toolCallId: e.toolCallId, toolName: e.toolName ?? 'unknown', args: e.args, startedAt: e.startedAt });
         } else if (e.type === 'tool-result') {
-          applyToolResult(saAcc, { toolCallId: e.toolCallId, toolName: e.toolName, result: e.result, startedAt: e.startedAt, finishedAt: e.finishedAt });
+          applyToolResult(saAcc, { toolCallId: e.toolCallId, toolName: e.toolName, result: e.result, startedAt: e.startedAt, finishedAt: e.finishedAt, durationMs: e.durationMs });
         } else if (e.type === 'tool-progress') {
           applyToolProgress(saAcc, { toolCallId: e.toolCallId, toolName: e.toolName, data: e.data as { stream?: 'stdout' | 'stderr'; output?: string; truncated?: boolean; stopped?: boolean } | undefined });
         } else if (e.type === 'error') {
@@ -1465,6 +1469,7 @@ export function RuntimeProvider({
           result: e.result,
           startedAt: e.startedAt,
           finishedAt: e.finishedAt,
+          durationMs: e.durationMs,
           compaction: e.compaction,
         });
       } else if (e.type === 'tool-progress') {
@@ -1574,6 +1579,12 @@ export function RuntimeProvider({
           setIsRunning(false);
           setTree([...acc.messages]);
           setHeadId(acc.headId);
+          // Update the model selector to reflect the actual model used (may differ
+          // from requested if a fallback occurred during the pipeline run).
+          const resolvedModel = (e.data as Record<string, unknown> | undefined)?.model as string | undefined;
+          if (resolvedModel) {
+            onModelFallbackRef.current?.(resolvedModel);
+          }
         }
         return;
       }

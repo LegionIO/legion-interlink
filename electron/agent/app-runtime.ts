@@ -275,6 +275,7 @@ async function* streamDaemonApp(options: StreamAppOptions): AsyncGenerator<Strea
     ...(daemonProviderOverride ? { provider: daemonProviderOverride } : {}),
     ...(options.tools?.length ? { tools: options.tools } : {}),
     ...(options.cwd ? { cwd: options.cwd } : {}),
+    ...(options.conversationId ? { conversation_id: options.conversationId } : {}),
   };
   if (options.reasoningEffort) {
     requestBody.reasoning_effort = options.reasoningEffort;
@@ -383,7 +384,8 @@ async function* consumeDaemonSSE(
           toolCallId: (payload.toolCallId as string) ?? (payload.tool_call_id as string),
           toolName: (payload.toolName as string) ?? (payload.tool_name as string),
           args: payload.args ?? payload.parameters ?? {},
-          startedAt: toIsoTimestamp(payload.timestamp) ?? new Date().toISOString(),
+          // Prefer explicit startedAt (millisecond precision) over generic timestamp
+          startedAt: toIsoTimestamp(payload.startedAt ?? payload.started_at ?? payload.timestamp) ?? new Date().toISOString(),
         }];
       }
 
@@ -391,10 +393,15 @@ async function* consumeDaemonSSE(
         return [{
           conversationId,
           type: 'tool-result',
-          toolCallId: (payload.toolCallId as string) ?? (payload.tool_call_id as string),
-          toolName: (payload.toolName as string) ?? (payload.tool_name as string),
-          result: payload.result ?? payload.content,
-          finishedAt: toIsoTimestamp(payload.timestamp) ?? new Date().toISOString(),
+          toolCallId:  (payload.toolCallId as string) ?? (payload.tool_call_id as string),
+          toolName:    (payload.toolName as string) ?? (payload.tool_name as string),
+          result:      payload.result ?? payload.content,
+          // Use explicit startedAt so the frontend can compute accurate wall-clock duration
+          startedAt:   toIsoTimestamp(payload.startedAt ?? payload.started_at) ?? undefined,
+          finishedAt:  toIsoTimestamp(payload.finishedAt ?? payload.finished_at ?? payload.timestamp) ?? new Date().toISOString(),
+          durationMs:  typeof payload.durationMs === 'number' ? payload.durationMs
+                     : typeof payload.duration_ms === 'number' ? payload.duration_ms
+                     : undefined,
         }];
       }
 
@@ -402,10 +409,11 @@ async function* consumeDaemonSSE(
         return [{
           conversationId,
           type: 'tool-result',
-          toolCallId: (payload.toolCallId as string) ?? (payload.tool_call_id as string),
-          toolName: (payload.toolName as string) ?? (payload.tool_name as string),
-          result: { isError: true, error: payload.error ?? payload.message ?? 'Tool execution failed' },
-          finishedAt: toIsoTimestamp(payload.timestamp) ?? new Date().toISOString(),
+          toolCallId:  (payload.toolCallId as string) ?? (payload.tool_call_id as string),
+          toolName:    (payload.toolName as string) ?? (payload.tool_name as string),
+          result:      { isError: true, error: payload.error ?? payload.message ?? 'Tool execution failed' },
+          startedAt:   toIsoTimestamp(payload.startedAt ?? payload.started_at) ?? undefined,
+          finishedAt:  toIsoTimestamp(payload.finishedAt ?? payload.finished_at ?? payload.timestamp) ?? new Date().toISOString(),
         }];
       }
 
@@ -459,12 +467,41 @@ async function* consumeDaemonSSE(
         if (enrichments && typeof enrichments === 'object' && !Array.isArray(enrichments)) {
           events.push({ conversationId, type: 'enrichment', data: enrichments });
         }
+        // Extract token usage from the done payload and emit as a context-usage event
+        // so RuntimeProvider can apply it to the message via applyTokenUsage.
+        // Use Number() coercion with Number.isFinite guard to handle string-encoded
+        // fields (common in JSON-over-SSE APIs) without relying on TypeScript casts.
+        const toCount = (v: unknown): number | undefined => {
+          const n = Number(v);
+          return Number.isFinite(n) ? n : undefined;
+        };
+        const inputTokens = toCount(payload.input_tokens ?? payload.inputTokens);
+        const outputTokens = toCount(payload.output_tokens ?? payload.outputTokens);
+        const cacheReadTokens = toCount(payload.cache_read_tokens ?? payload.cacheReadTokens);
+        const cacheWriteTokens = toCount(payload.cache_write_tokens ?? payload.cacheWriteTokens);
+        if (inputTokens !== undefined || outputTokens !== undefined) {
+          events.push({
+            conversationId,
+            type: 'context-usage',
+            data: {
+              inputTokens:       inputTokens       ?? 0,
+              outputTokens:      outputTokens      ?? 0,
+              cacheReadTokens:   cacheReadTokens   ?? 0,
+              cacheWriteTokens:  cacheWriteTokens  ?? 0,
+              totalTokens:       (inputTokens ?? 0) + (outputTokens ?? 0),
+            },
+          });
+        }
         events.push({ conversationId, type: 'done', data: payload });
         return events;
       }
 
       if (eventName === 'context_usage' || eventName === 'context-usage') {
         return [{ conversationId, type: 'context-usage', data: payload }];
+      }
+
+      if (eventName === 'model-fallback' || eventName === 'model_fallback') {
+        return [{ conversationId, type: 'model-fallback', data: payload }];
       }
 
       if (
