@@ -5,7 +5,8 @@
  * Knowledge and memory are managed by the Legion daemon (Apollo).
  */
 
-export function getSharedMemory(_config: unknown, _dbPath?: string): null {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function getSharedMemory(_config: unknown, _dbPath?: string): any {
   return null;
 }
 

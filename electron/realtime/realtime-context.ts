@@ -160,7 +160,7 @@ export async function buildRealtimeMemoryContext(
           // Log first few message roles for debugging
           const preview = result.messages
             .slice(0, 5)
-            .map((message) => {
+            .map((message: unknown) => {
               const typedMessage = message as ConversationMessage;
               const contentPreview = typeof typedMessage.content === 'string'
                 ? typedMessage.content.slice(0, 50)

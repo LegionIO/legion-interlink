@@ -16,7 +16,8 @@ export type ConversationCompactionConfig = {
 export type ToolCompactionConfig = {
   enabled: boolean;
   triggerTokens: number;
-  summaryMaxTokens: number;
+  summaryMaxTokens?: number;
+  [key: string]: unknown;
 };
 
 export function shouldCompact(

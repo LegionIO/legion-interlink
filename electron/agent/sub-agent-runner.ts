@@ -15,7 +15,17 @@ export type SubAgentEvent =
     parentToolCallId: string;
     type: 'sub-agent-status';
     status: 'running' | 'awaiting-input' | 'completed' | 'stopped' | 'failed';
+    summary?: string;
     data?: unknown;
+  }
+  | {
+    subAgentConversationId: string;
+    parentConversationId: string;
+    parentToolCallId: string;
+    conversationId: string;
+    type: 'sub-agent-user-message';
+    text: string;
+    source: string;
   };
 
 export async function* runSubAgent(
