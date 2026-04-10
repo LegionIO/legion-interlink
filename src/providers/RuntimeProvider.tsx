@@ -390,6 +390,26 @@ function finalizeAssistantResponse(acc: MessageAccumulator, finishedAt = nowIso(
     return;
   }
 
+  // Force-complete any tool-call parts that never received a tool-result.
+  // This prevents tools from showing "RUNNING" forever after a stream drop.
+  const content = acc.messages[idx].content;
+  if (Array.isArray(content)) {
+    type ToolCallPart = { type: string; result?: unknown; finishedAt?: string; isError?: boolean; isHung?: boolean };
+    let mutated = false;
+    for (const part of content) {
+      const tc = part as ToolCallPart;
+      if (tc.type === 'tool-call' && tc.result === undefined) {
+        tc.result = { isHung: true, error: 'Stream ended before tool result was received.' };
+        tc.isHung = true;
+        tc.finishedAt = finishedAt;
+        mutated = true;
+      }
+    }
+    if (mutated) {
+      acc.messages[idx] = { ...acc.messages[idx], content: [...content] };
+    }
+  }
+
   acc.messages[idx] = withResponseTiming(acc.messages[idx], buildResponseTiming(startedAt, finishedAt));
   acc.pendingAssistantTiming = null;
 }
@@ -1122,6 +1142,28 @@ export function RuntimeProvider({
     if (!conv) return false;
 
     const { tree: t, headId: h } = ensureTree(conv);
+
+    // Repair persisted conversations: mark any tool-call parts that never
+    // received a result as hung so they don't tick forever in the UI.
+    for (const msg of t) {
+      if (msg.role !== 'assistant' || !Array.isArray(msg.content)) continue;
+      type PersistedToolPart = { type: string; result?: unknown; isHung?: boolean; finishedAt?: string };
+      let repaired = false;
+      for (const part of msg.content) {
+        const tc = part as PersistedToolPart;
+        if (tc.type === 'tool-call' && tc.result === undefined) {
+          tc.result = { isHung: true, error: 'Stream ended before tool result was received.' };
+          tc.isHung = true;
+          tc.finishedAt = tc.finishedAt ?? new Date().toISOString();
+          repaired = true;
+        }
+      }
+      if (repaired) {
+        const idx = t.indexOf(msg);
+        if (idx >= 0) t[idx] = { ...msg, content: [...msg.content] };
+      }
+    }
+
     setActiveConversationId(id);
     setTree(t);
     setHeadId(h);

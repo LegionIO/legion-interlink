@@ -1,27 +1,16 @@
-name: Release
+name: CI/CD
 
 on:
+  push:
+    branches: [main]
   pull_request:
-  workflow_dispatch:
-    inputs:
-      verbump:
-        description: Version bump to apply before releasing
-        required: true
-        default: patch
-        type: choice
-        options:
-          - none
-          - major
-          - minor
-          - patch
 
 concurrency:
-  group: release-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   checks:
-    if: ${{ github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -45,16 +34,27 @@ jobs:
 
       - run: pnpm build
 
-  pr-mac-build:
-    if: ${{ github.event_name == 'pull_request' }}
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: checks
     runs-on: macos-26
     permissions:
-      contents: read
+      contents: write
     env:
-      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      GH_TOKEN: ${{ github.token }}
+      CSC_LINK: ${{ secrets.CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      asset_name: ${{ steps.artifact.outputs.name }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: pnpm/action-setup@v4
         with:
@@ -65,127 +65,37 @@ jobs:
           node-version: 22
           cache: pnpm
 
-      - run: pnpm install --frozen-lockfile
-
-      - run: pnpm build:mac
-
-  prepare-release:
-    if: ${{ github.event_name == 'workflow_dispatch' }}
-    needs: checks
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-      tag: ${{ steps.version.outputs.tag }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Require default branch
-        env:
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          REF_NAME: ${{ github.ref_name }}
-          REF_TYPE: ${{ github.ref_type }}
-        run: |
-          if [ "$REF_TYPE" != "branch" ]; then
-            echo "workflow_dispatch must run from a branch ref." >&2
-            exit 1
-          fi
-
-          if [ "$REF_NAME" != "$DEFAULT_BRANCH" ]; then
-            echo "workflow_dispatch releases are only allowed from ${DEFAULT_BRANCH}, not ${REF_NAME}." >&2
-            exit 1
-          fi
-
-      - name: Bump package version
-        if: ${{ inputs.verbump != 'none' }}
-        run: npm version "${{ inputs.verbump }}" --no-git-tag-version
-
-      - name: Resolve release version
+      - name: Resolve version
         id: version
         run: |
           version="$(node -p "require('./package.json').version")"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=v$version" >> "$GITHUB_OUTPUT"
 
-      - name: Commit package version bump
-        if: ${{ inputs.verbump != 'none' }}
-        env:
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add package.json
-
-          if git diff --cached --quiet; then
-            echo "package.json did not change after version bump." >&2
-            exit 1
-          fi
-
-          git commit -m "release: v${VERSION}"
-          git push origin "HEAD:${DEFAULT_BRANCH}"
-
-      - name: Ensure release tag is new
+      - name: Check if tag exists
+        id: tag_check
         env:
           TAG: ${{ steps.version.outputs.tag }}
         run: |
           git fetch --tags origin
-
           if git show-ref --verify --quiet "refs/tags/${TAG}"; then
-            echo "Tag ${TAG} already exists." >&2
-            exit 1
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Create and push release tag
-        env:
-          TAG: ${{ steps.version.outputs.tag }}
-        run: |
-          git tag "$TAG"
-          git push origin "$TAG"
-
-  publish-release:
-    if: ${{ github.event_name == 'workflow_dispatch' }}
-    needs: prepare-release
-    runs-on: macos-26
-    permissions:
-      contents: write
-    env:
-      GH_TOKEN: ${{ github.token }}
-      # Code signing — electron-builder reads these automatically
-      CSC_LINK: ${{ secrets.CSC_LINK }}
-      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-      # Notarization — electron-builder reads these automatically
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-    outputs:
-      asset_name: ${{ steps.artifact.outputs.name }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.prepare-release.outputs.tag }}
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10.22.0
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
+      - name: Skip release if tag exists
+        if: steps.tag_check.outputs.exists == 'true'
+        run: echo "Tag ${{ steps.version.outputs.tag }} already exists — skipping release."
 
       - run: pnpm install --frozen-lockfile
+        if: steps.tag_check.outputs.exists == 'false'
 
       - run: pnpm build:mac
+        if: steps.tag_check.outputs.exists == 'false'
 
       - name: Verify Swift helper binary
+        if: steps.tag_check.outputs.exists == 'false'
         run: |
           APP_PATH="$(find dist/mac-arm64 -maxdepth 1 -name '*.app' -type d | head -n 1)"
           HELPER="$APP_PATH/Contents/Resources/bin/LocalMacosHelper"
@@ -200,7 +110,6 @@ jobs:
           echo "Code signature:"
           codesign -dvv "$HELPER" 2>&1
 
-          # Verify the helper can run and report permissions (basic smoke test)
           RESULT=$("$HELPER" permissions 2>&1)
           echo "Permissions check output: $RESULT"
 
@@ -209,9 +118,8 @@ jobs:
             exit 1
           fi
 
-          echo "✓ LocalMacosHelper binary verified"
-
       - name: Verify code signature
+        if: steps.tag_check.outputs.exists == 'false'
         run: |
           APP_PATH="$(find dist/mac-arm64 -maxdepth 1 -name '*.app' -type d | head -n 1)"
           if [ -z "$APP_PATH" ]; then
@@ -227,6 +135,7 @@ jobs:
           xcrun stapler validate "$APP_PATH" || echo "Warning: staple not found (notarization may still be processing)"
 
       - name: Locate DMG artifact
+        if: steps.tag_check.outputs.exists == 'false'
         id: artifact
         run: |
           artifact_path="$(find dist -maxdepth 1 -type f -name '*.dmg' | head -n 1)"
@@ -239,31 +148,37 @@ jobs:
           echo "path=$artifact_path" >> "$GITHUB_OUTPUT"
           echo "name=$(basename "$artifact_path")" >> "$GITHUB_OUTPUT"
 
-      - name: Create GitHub release
+      - name: Create tag and GitHub release
+        if: steps.tag_check.outputs.exists == 'false'
         env:
-          TAG: ${{ needs.prepare-release.outputs.tag }}
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
+          git tag "$TAG"
+          git push origin "$TAG"
           gh release create "$TAG" "${{ steps.artifact.outputs.path }}" \
             --generate-notes \
             --title "$TAG" \
             --verify-tag
 
   update-cask:
-    if: ${{ github.event_name == 'workflow_dispatch' }}
-    needs:
-      - prepare-release
-      - publish-release
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: release
     runs-on: ubuntu-latest
     permissions:
       contents: read
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
+      - name: Skip if no new release
+        if: needs.release.outputs.asset_name == ''
+        run: echo "No new release — skipping cask update."
+
       - name: Download DMG and compute SHA256
+        if: needs.release.outputs.asset_name != ''
         id: sha
         env:
-          ASSET_NAME: ${{ needs.publish-release.outputs.asset_name }}
-          TAG: ${{ needs.prepare-release.outputs.tag }}
+          ASSET_NAME: ${{ needs.release.outputs.asset_name }}
+          TAG: ${{ needs.release.outputs.tag }}
         run: |
           gh release download "$TAG" \
             --pattern "$ASSET_NAME" \
@@ -274,18 +189,20 @@ jobs:
           echo "asset_name_url=${ASSET_NAME// /%20}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v4
+        if: needs.release.outputs.asset_name != ''
         with:
           repository: LegionIO/homebrew-tap
           token: ${{ secrets.HOMEBREW_DISPATCH_TOKEN }}
           path: homebrew-tap
 
       - name: Update cask formula
+        if: needs.release.outputs.asset_name != ''
         working-directory: homebrew-tap
         env:
           ASSET_NAME_URL: ${{ steps.sha.outputs.asset_name_url }}
           REPOSITORY: ${{ github.repository }}
           SHA256: ${{ steps.sha.outputs.sha256 }}
-          VERSION: ${{ needs.prepare-release.outputs.version }}
+          VERSION: ${{ needs.release.outputs.version }}
         run: |
           mkdir -p Casks
           cat > Casks/legion-interlink.rb << RUBY
@@ -305,9 +222,10 @@ jobs:
           RUBY
 
       - name: Commit and push cask update
+        if: needs.release.outputs.asset_name != ''
         working-directory: homebrew-tap
         env:
-          VERSION: ${{ needs.prepare-release.outputs.version }}
+          VERSION: ${{ needs.release.outputs.version }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"

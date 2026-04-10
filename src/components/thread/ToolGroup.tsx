@@ -21,6 +21,7 @@ type ToolCallPart = {
   argsText?: string;
   result?: unknown;
   isError?: boolean;
+  isHung?: boolean;
   startedAt?: string;
   finishedAt?: string;
   durationMs?: number;
@@ -57,8 +58,9 @@ export const ToolCallDisplay: FC<{ part: ToolCallPart }> = ({ part }) => {
   const [expanded, setExpanded] = useState(false);
   const [showOriginal, setShowOriginal] = useState(false);
   const hasResult = part.result !== undefined;
-  const isError = part.isError || (hasResult && isErrorResult(part.result));
-  const isRunning = !hasResult;
+  const isHung = Boolean(part.isHung);
+  const isError = !isHung && (part.isError || (hasResult && isErrorResult(part.result)));
+  const isRunning = !hasResult && !isHung;
   const hasLiveOutput = Boolean(part.liveOutput?.stdout || part.liveOutput?.stderr);
   const wasCompacted = Boolean(part.compactionMeta?.wasCompacted);
   const canShowOriginal = wasCompacted && part.originalResult !== undefined;
@@ -78,7 +80,7 @@ export const ToolCallDisplay: FC<{ part: ToolCallPart }> = ({ part }) => {
         ) : (
           <ChevronRightIcon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
         )}
-        <StatusBadge isRunning={isRunning} isError={isError} />
+        <StatusBadge isRunning={isRunning} isError={isError} isHung={isHung} />
         {wasCompacted && <CompactedBadge />}
         {isSummarizing && <SummarizingBadge />}
         <span className="font-mono text-xs font-semibold truncate">{part.toolName}</span>
@@ -88,11 +90,12 @@ export const ToolCallDisplay: FC<{ part: ToolCallPart }> = ({ part }) => {
         <ToolElapsedBadge
           isRunning={isRunning}
           isError={Boolean(isError)}
+          isHung={isHung}
           startedAt={part.startedAt}
           finishedAt={part.finishedAt}
           durationMs={part.durationMs}
         />
-        <ToolStatusIcon isRunning={isRunning} isError={isError} />
+        <ToolStatusIcon isRunning={isRunning} isError={isError} isHung={isHung} />
       </button>
 
       {/* Expanded detail */}
@@ -255,7 +258,10 @@ const MediaPreview: FC<{ media: MediaResult }> = ({ media }) => {
 
 /* ── Status Badges ── */
 
-const StatusBadge: FC<{ isRunning: boolean; isError: boolean }> = ({ isRunning, isError }) => {
+const StatusBadge: FC<{ isRunning: boolean; isError: boolean; isHung?: boolean }> = ({ isRunning, isError, isHung }) => {
+  if (isHung) {
+    return <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400">HUNG</span>;
+  }
   if (isRunning) {
     return <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-500/10 text-blue-600 dark:text-blue-400">RUNNING</span>;
   }
@@ -292,7 +298,10 @@ const CompactionToggle: FC<{ showOriginal: boolean; onToggle: () => void }> = ({
   </span>
 );
 
-const ToolStatusIcon: FC<{ isRunning: boolean; isError: boolean }> = ({ isRunning, isError }) => {
+const ToolStatusIcon: FC<{ isRunning: boolean; isError: boolean; isHung?: boolean }> = ({ isRunning, isError, isHung }) => {
+  if (isHung) {
+    return <AlertCircleIcon className="h-3.5 w-3.5 text-amber-500 shrink-0" />;
+  }
   if (isRunning) {
     return <LoaderIcon className="h-3.5 w-3.5 animate-spin text-blue-500 shrink-0" />;
   }
@@ -305,17 +314,18 @@ const ToolStatusIcon: FC<{ isRunning: boolean; isError: boolean }> = ({ isRunnin
 const ToolElapsedBadge: FC<{
   isRunning: boolean;
   isError: boolean;
+  isHung?: boolean;
   startedAt?: string;
   finishedAt?: string;
   durationMs?: number;
-}> = ({ isRunning, isError, startedAt, finishedAt, durationMs }) => {
+}> = ({ isRunning, isError, isHung, startedAt, finishedAt, durationMs }) => {
   return (
     <ElapsedBadge
       startedAt={startedAt}
       finishedAt={finishedAt}
       durationMs={durationMs}
-      isRunning={isRunning}
-      isError={isError}
+      isRunning={isRunning && !isHung}
+      isError={isError || isHung}
       className="ml-auto"
     />
   );
