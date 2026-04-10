@@ -8,6 +8,35 @@ export type DaemonResult<T = unknown> = { ok: boolean; data?: T; error?: string 
 
 export const DAEMON_TIMEOUT_MS = 5000;
 
+// Circuit breaker: when the daemon is unreachable, skip all non-health requests
+// to avoid hammering a dead endpoint and burning CPU on timeouts.
+let daemonReachable = false;
+let lastHealthCheckAt = 0;
+const HEALTH_RECHECK_MS = 10_000;
+
+export function isDaemonReachable(): boolean {
+  return daemonReachable;
+}
+
+export function markDaemonReachable(reachable: boolean): void {
+  daemonReachable = reachable;
+  lastHealthCheckAt = Date.now();
+}
+
+function shouldShortCircuit(path: string): boolean {
+  // Always allow health and ready checks through so the breaker can recover
+  if (path === '/api/health' || path === '/api/ready') return false;
+  if (daemonReachable) return false;
+  // If we haven't checked recently, let the request through to re-probe
+  if (Date.now() - lastHealthCheckAt > HEALTH_RECHECK_MS) return false;
+  return true;
+}
+
+const CIRCUIT_OPEN_RESULT: DaemonResult = {
+  ok: false,
+  error: 'Daemon unreachable (circuit breaker open)',
+};
+
 export function resolveDaemonUrl(config: AppConfig): string {
   return config.runtime?.daemon?.daemonUrl?.trim() || 'http://127.0.0.1:4567';
 }
@@ -59,6 +88,8 @@ export async function daemonGet<T = unknown>(
   path: string,
   query?: Record<string, string>,
 ): Promise<DaemonResult<T>> {
+  if (shouldShortCircuit(path)) return CIRCUIT_OPEN_RESULT as DaemonResult<T>;
+
   const base = resolveDaemonUrl(config);
   const url = new URL(path, base);
   if (query) {
@@ -69,10 +100,15 @@ export async function daemonGet<T = unknown>(
 
   try {
     const resp = await fetch(url.toString(), { headers: authHeaders(config, appHome), ...withTimeout() });
-    if (!resp.ok) return { ok: false, error: `HTTP ${resp.status}` };
+    if (!resp.ok) {
+      if (path === '/api/health' || path === '/api/ready') markDaemonReachable(false);
+      return { ok: false, error: `HTTP ${resp.status}` };
+    }
+    if (path === '/api/health' || path === '/api/ready') markDaemonReachable(true);
     const body = await resp.json() as { data?: T };
     return { ok: true, data: (body.data ?? body) as T };
   } catch (err) {
+    if (path === '/api/health' || path === '/api/ready') markDaemonReachable(false);
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
 }
@@ -83,6 +119,7 @@ export async function daemonPost<T = unknown>(
   path: string,
   body: unknown,
 ): Promise<DaemonResult<T>> {
+  if (shouldShortCircuit(path)) return CIRCUIT_OPEN_RESULT as DaemonResult<T>;
   const base = resolveDaemonUrl(config);
   try {
     const resp = await fetch(new URL(path, base).toString(), {
@@ -108,6 +145,7 @@ export async function daemonPatch<T = unknown>(
   path: string,
   body: unknown,
 ): Promise<DaemonResult<T>> {
+  if (shouldShortCircuit(path)) return CIRCUIT_OPEN_RESULT as DaemonResult<T>;
   const base = resolveDaemonUrl(config);
   try {
     const resp = await fetch(new URL(path, base).toString(), {
@@ -133,6 +171,7 @@ export async function daemonPut<T = unknown>(
   path: string,
   body: unknown,
 ): Promise<DaemonResult<T>> {
+  if (shouldShortCircuit(path)) return CIRCUIT_OPEN_RESULT as DaemonResult<T>;
   const base = resolveDaemonUrl(config);
   try {
     const resp = await fetch(new URL(path, base).toString(), {
@@ -157,6 +196,7 @@ export async function daemonDelete(
   appHome: string,
   path: string,
 ): Promise<DaemonResult> {
+  if (shouldShortCircuit(path)) return CIRCUIT_OPEN_RESULT;
   const base = resolveDaemonUrl(config);
   try {
     const resp = await fetch(new URL(path, base).toString(), {
