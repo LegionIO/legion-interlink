@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.0] - 2026-04-09
+
+### Changed
+- Rip and shift
+
 ## [1.0.18] - 2026-04-07
 
 ### Added
