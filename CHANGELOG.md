@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.2] - 2026-04-12
+
+### Added
+- `DaemonChatClient` — HTTP + SSE client for `/api/llm/inference` and `/api/skills/*` daemon endpoints, replacing direct local skill execution in Interlink
+
+### Changed
+- Skills IPC (`electron/ipc/skills.ts`) rewritten to delegate all skill operations to the Legion daemon instead of executing locally; list, show, and run now proxy through `DaemonChatClient`
+
 ## [1.1.0] - 2026-04-09
 
 ### Removed
