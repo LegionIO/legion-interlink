@@ -382,9 +382,21 @@ function formatArgs(args: unknown): string {
 
 function formatResult(result: unknown): string {
   const sanitized = sanitizeResultForDisplay(result);
+  // If the result (or its unwrapped value) is already a plain string, return
+  // it directly to avoid the double-encoding bug where a string value gets
+  // JSON.stringify'd into an escaped `"some text"` artifact.
   if (typeof sanitized === 'string') return sanitized;
   try {
-    return JSON.stringify(sanitized, null, 2);
+    const serialized = JSON.stringify(sanitized, null, 2);
+    // If JSON.stringify produced a quoted string (meaning sanitized was
+    // somehow still a string at this point), unwrap it.
+    if (typeof serialized === 'string' && serialized.startsWith('"') && serialized.endsWith('"')) {
+      try {
+        const inner = JSON.parse(serialized) as unknown;
+        if (typeof inner === 'string') return inner;
+      } catch { /* fall through to return serialized */ }
+    }
+    return serialized;
   } catch {
     return String(sanitized);
   }

@@ -193,9 +193,31 @@ function normalizeMessages(messages: unknown[]): RuntimeMessage[] {
 }
 
 function stringifyValue(value: unknown, maxLength = 2000): string {
+  // Guard against double-encoding: if `value` is already a plain string, use
+  // it directly. If it is a non-string that JSON.stringify wraps in quotes
+  // (e.g. a string-typed field that arrived pre-serialized from the daemon),
+  // unwrap one layer so the LLM context contains readable text instead of the
+  // escaped `"\"some result\""` artifact that causes the double-JSON bug.
   try {
-    const text = typeof value === 'string' ? value : JSON.stringify(value);
-    if (typeof text !== 'string') return String(value);
+    let text: string;
+    if (typeof value === 'string') {
+      text = value;
+    } else {
+      const serialized = JSON.stringify(value);
+      if (typeof serialized !== 'string') return String(value);
+      // Detect a pre-serialized JSON string — JSON.stringify would wrap it in
+      // another layer of quotes producing `"\"already serialized\""`.
+      if (serialized.startsWith('"') && serialized.endsWith('"')) {
+        try {
+          const inner = JSON.parse(serialized) as unknown;
+          text = typeof inner === 'string' ? inner : serialized;
+        } catch {
+          text = serialized;
+        }
+      } else {
+        text = serialized;
+      }
+    }
     return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
   } catch {
     return String(value);
