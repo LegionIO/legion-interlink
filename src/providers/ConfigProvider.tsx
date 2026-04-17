@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, useMemo, useCallback, type ReactNode } from 'react';
 import { app } from '@/lib/ipc-client';
 
 type AppConfig = Record<string, unknown>;
@@ -18,12 +18,10 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     try {
-      // Load initial config
       app.config.get()
         .then((cfg) => setConfig(cfg as AppConfig))
         .catch((err) => console.error('[Config] Failed to load:', err));
 
-      // Listen for config changes
       const unsubscribe = app.config.onChanged((cfg) => {
         setConfig(cfg as AppConfig);
       });
@@ -34,17 +32,19 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const updateConfig = async (path: string, value: unknown) => {
+  const updateConfig = useCallback(async (path: string, value: unknown) => {
     try {
       const updated = await app.config.set(path, value);
       setConfig(updated as AppConfig);
     } catch (err) {
       console.error('[Config] Failed to update:', err);
     }
-  };
+  }, []);
+
+  const value = useMemo(() => ({ config, updateConfig }), [config, updateConfig]);
 
   return (
-    <ConfigContext.Provider value={{ config, updateConfig }}>
+    <ConfigContext.Provider value={value}>
       {children}
     </ConfigContext.Provider>
   );

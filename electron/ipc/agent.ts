@@ -102,7 +102,9 @@ export function registerAgentHandlers(ipcMain: IpcMain, appHome: string): void {
 
     const controller = new AbortController();
     activeStreams.set(conversationId, { abort: () => controller.abort() });
-    const observerSessionId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const randomBytes = new Uint8Array(4);
+    crypto.getRandomValues(randomBytes);
+    const observerSessionId = `${Date.now()}-${Array.from(randomBytes, (b) => b.toString(16).padStart(2, '0')).join('')}`;
     activeObserverSessions.set(conversationId, observerSessionId);
 
     let config: AppConfig;

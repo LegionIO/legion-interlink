@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import sanitizeHtml from 'sanitize-html';
 import type { ToolDefinition } from './types.js';
 import { withBrandUserAgent } from '../utils/user-agent.js';
 
@@ -26,14 +27,16 @@ export const webSearchTool: ToolDefinition = {
 
       const links = [...html.matchAll(resultRegex)];
       const snippets = [...html.matchAll(snippetRegex)];
+      const stripTags = (s: string) =>
+        sanitizeHtml(s, { allowedTags: [], allowedAttributes: {} }).trim();
 
       for (let i = 0; i < Math.min(links.length, maxResults); i++) {
         const rawUrl = links[i][1];
         const decodedUrl = decodeURIComponent(rawUrl.replace(/.*uddg=/, '').split('&')[0]);
         results.push({
           url: decodedUrl,
-          title: links[i][2].replace(/<[^>]+>/g, '').trim(),
-          snippet: snippets[i] ? snippets[i][1].replace(/<[^>]+>/g, '').trim() : '',
+          title: stripTags(links[i][2]),
+          snippet: snippets[i] ? stripTags(snippets[i][1]) : '',
         });
       }
 

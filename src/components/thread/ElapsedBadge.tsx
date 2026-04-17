@@ -1,6 +1,29 @@
 import { useEffect, useMemo, useRef, useState, type FC } from 'react';
 import { formatElapsed, parseTimestampMs } from '@/lib/response-timing';
 
+// Shared 500ms ticker — all running badges subscribe to one interval instead of N×100ms
+let tickerCount = 0;
+let tickerInterval: ReturnType<typeof setInterval> | null = null;
+const tickerListeners = new Set<() => void>();
+
+function subscribeToTicker(fn: () => void): () => void {
+  tickerListeners.add(fn);
+  tickerCount++;
+  if (tickerInterval === null) {
+    tickerInterval = setInterval(() => {
+      for (const listener of tickerListeners) listener();
+    }, 500);
+  }
+  return () => {
+    tickerListeners.delete(fn);
+    tickerCount--;
+    if (tickerCount === 0 && tickerInterval !== null) {
+      clearInterval(tickerInterval);
+      tickerInterval = null;
+    }
+  };
+}
+
 export const ElapsedBadge: FC<{
   startedAt?: string;
   finishedAt?: string;
@@ -23,10 +46,8 @@ export const ElapsedBadge: FC<{
   useEffect(() => {
     if (isRunning) {
       setFrozenEndMs(null);
-      const tick = () => setNowMs(Date.now());
-      tick();
-      const interval = window.setInterval(tick, 100);
-      return () => window.clearInterval(interval);
+      setNowMs(Date.now());
+      return subscribeToTicker(() => setNowMs(Date.now()));
     }
 
     if (finishedMs == null && frozenEndMs == null) {
@@ -37,9 +58,6 @@ export const ElapsedBadge: FC<{
   }, [isRunning, finishedMs, frozenEndMs]);
 
   const endMs = finishedMs ?? frozenEndMs ?? nowMs;
-  // Prefer server-computed durationMs (millisecond precision from Ruby Time.now)
-  // over ISO timestamp subtraction which loses sub-ms precision and shows 0ms for fast tools.
-  // Enforce minimum display of 1ms so completed tools never show "0ms".
   const elapsedMs = isRunning
     ? Math.max(0, endMs - startedMs)
     : Math.max(1, durationMs ?? Math.max(0, endMs - startedMs));

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import sanitizeHtml from 'sanitize-html';
 import type { ToolDefinition } from './types.js';
 import { withBrandUserAgent } from '../utils/user-agent.js';
 
@@ -21,10 +22,10 @@ export const webFetchTool: ToolDefinition = {
       let content = await resp.text();
 
       if (contentType.includes('text/html')) {
-        content = content
-          .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-          .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-          .replace(/<[^>]+>/g, ' ')
+        content = sanitizeHtml(content, {
+          allowedTags: [],
+          allowedAttributes: {},
+        })
           .replace(/\s+/g, ' ')
           .trim();
       }

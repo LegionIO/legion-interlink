@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.1.4] - 2026-04-17
+
+### Performance
+- Removed unused `ComposerBackdrop` dead code; no shipped runtime behavior change for composer backdrop handling (#24)
+- `Thread`: matrix canvas animation now pauses on `visibilitychange`/window `blur` and resumes on focus; frame interval throttled from 65ms (~15fps) to 130ms (~8fps) (#25)
+- `ConversationList`: replaced 1500ms `setInterval` polling with `conversations:changed` IPC push subscription — eliminates 40+ IPC round-trips/min for users with large conversation history (#26)
+- `ConfigProvider`: context value wrapped in `useMemo`, `updateConfig` stabilized with `useCallback` — stops cascading re-renders across all settings consumers on every config update
+- `ElapsedBadge`: replaced N independent 100ms per-badge intervals with a single shared 500ms module-level ticker — one `setInterval` for all running tool badges combined
+- `GaiaPresenceIndicator`: GAIA status poll interval increased from 10s to 30s (always-mounted sidebar component; status changes infrequently)
+
+### Security
+- Replaced `Math.random()` with `crypto.getRandomValues()` for observer session IDs (`electron/ipc/agent.ts`) and computer-use session IDs (`shared/computer-use.ts`) — fixes insecure randomness in security-sensitive ID generation (#8, #9)
+- Guarded `setNestedValue` (`electron/ipc/config.ts`) and `setNested` (`electron/tools/config-manage.ts`) against prototype pollution — path segments `__proto__`, `constructor`, and `prototype` are now rejected; traversal uses `hasOwnProperty` (#10, #11)
+- Fixed incomplete HTML sanitization in `web-fetch` tool: script/style regexes now match whitespace before closing `>` (e.g. `</script  >`), and HTML comments are explicitly stripped before tag removal (#2, #3, #7)
+- Fixed incomplete HTML sanitization in `web-search` tool: title/snippet stripping now uses a full pipeline (script → style → comments → tags) instead of a single tag-only pass (#4, #5)
+- Fixed incomplete HTML comment stripping in `CodeBlock` HTML minification: added second pass to remove unclosed `<!--` fragments left by malformed HTML (#6)
+
 ## [1.1.3] - 2026-04-17
 
 ### Fixed

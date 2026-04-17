@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FC } from 'react';
+import { useEffect, useState, type FC } from 'react';
 import { ActivityIcon } from 'lucide-react';
 import { app } from '@/lib/ipc-client';
 
@@ -41,22 +41,26 @@ function deriveState(result: { ok: boolean; data?: unknown }): GaiaState {
 
 export const GaiaPresenceIndicator: FC = () => {
   const [state, setState] = useState<GaiaState>({ status: 'offline' });
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const poll = async () => {
-    try {
-      const result = await app.daemon.gaiaStatus();
-      setState(deriveState(result as { ok: boolean; data?: unknown }));
-    } catch {
-      setState({ status: 'offline' });
-    }
-  };
 
   useEffect(() => {
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const result = await app.daemon.gaiaStatus();
+        if (!cancelled) setState(deriveState(result as { ok: boolean; data?: unknown }));
+      } catch {
+        if (!cancelled) setState({ status: 'offline' });
+      }
+    };
+
     void poll();
-    intervalRef.current = setInterval(() => { void poll(); }, 10_000);
+
+    // Back off to 30s — GAIA status changes infrequently and this component is always mounted
+    const interval = setInterval(() => { void poll(); }, 30_000);
     return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
+      cancelled = true;
+      clearInterval(interval);
     };
   }, []);
 

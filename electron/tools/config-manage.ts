@@ -17,12 +17,15 @@ function getNested(obj: Record<string, unknown>, path: string): unknown {
   return current;
 }
 
+const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
 function setNested(obj: Record<string, unknown>, path: string, value: unknown): void {
   const keys = path.split('.');
+  if (keys.some((k) => DANGEROUS_KEYS.has(k))) return;
   let current = obj;
   for (let i = 0; i < keys.length - 1; i++) {
     const key = keys[i];
-    if (!(key in current) || typeof current[key] !== 'object' || current[key] === null) {
+    if (!Object.prototype.hasOwnProperty.call(current, key) || typeof current[key] !== 'object' || current[key] === null) {
       current[key] = {};
     }
     current = current[key] as Record<string, unknown>;
