@@ -141,6 +141,8 @@ export const ConversationList: FC<ConversationListProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [removingIds, setRemovingIds] = useState<Set<string>>(new Set());
+  // Keep a ref in sync so loadConversations can read removingIds without a stale closure
+  const removingIdsRef = useRef<Set<string>>(new Set());
   const [pinnedIds, setPinnedIds] = useState<Set<string>>(() => {
     try { return new Set(JSON.parse(localStorage.getItem(__BRAND_APP_SLUG + ':pinned-conversations') || '[]')); } catch { return new Set(); }
   });
@@ -185,21 +187,23 @@ export const ConversationList: FC<ConversationListProps> = ({
     }
   }, [activeConversationId, activeThreadMode, sessionsByConversation]);
 
-  const loadConversations = async () => {
+  const loadConversations = useCallback(async () => {
     try {
       const list = await app.conversations.list() as ConversationSummary[];
 
       // Detect conversations that were removed since last load (auto-cleanup)
-      // and animate them out before removing from state
+      // and animate them out before removing from state.
+      // Read removingIds from the ref to avoid stale closure issues.
       setConversations((prev) => {
         const newIds = new Set(list.map((c) => c.id));
-        const vanished = prev.filter((c) => !newIds.has(c.id) && !removingIds.has(c.id));
+        const vanished = prev.filter((c) => !newIds.has(c.id) && !removingIdsRef.current.has(c.id));
 
         if (vanished.length > 0) {
           // Mark vanished items for animation
           setRemovingIds((ids) => {
             const next = new Set(ids);
             for (const c of vanished) next.add(c.id);
+            removingIdsRef.current = next;
             return next;
           });
           // After animation, remove them from state
@@ -207,6 +211,7 @@ export const ConversationList: FC<ConversationListProps> = ({
             setRemovingIds((ids) => {
               const next = new Set(ids);
               for (const c of vanished) next.delete(c.id);
+              removingIdsRef.current = next;
               return next;
             });
             setConversations((current) =>
@@ -222,14 +227,14 @@ export const ConversationList: FC<ConversationListProps> = ({
     } catch {
       // IPC not ready
     }
-  };
+  }, []);
 
   useEffect(() => {
-    loadConversations();
+    void loadConversations();
     // Replace 1500ms polling with push events — main process broadcasts on every mutation
     const unsub = app.conversations.onChanged(() => { void loadConversations(); });
     return unsub;
-  }, []);
+  }, [loadConversations]);
 
   const isSearchActive = searchQuery.trim().length > 0;
   const hasActiveFilters = activeFilterCount > 0;
