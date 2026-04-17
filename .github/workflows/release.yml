@@ -9,34 +9,112 @@ concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+# ── Shared setup anchor ────────────────────────────────────────────────────────
+# Each job that needs Node runs these three steps. Keeping them DRY via YAML
+# anchors isn't supported in GitHub Actions, so each job repeats the three lines.
+# pnpm's content-addressable store is cached by setup-node so installs are fast.
+
 jobs:
-  checks:
+  # ── Lint ──────────────────────────────────────────────────────────────────────
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v4
-
       - uses: pnpm/action-setup@v4
         with:
           version: 10.22.0
-
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
-
       - run: pnpm install --frozen-lockfile
-
       - run: pnpm lint
 
+  # ── Type check ────────────────────────────────────────────────────────────────
+  type-check:
+    name: Type Check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.22.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       - run: pnpm type-check
 
+  # ── Build ─────────────────────────────────────────────────────────────────────
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.22.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       - run: pnpm build
 
+  # ── Version bump check (PRs only) ─────────────────────────────────────────────
+  version-check:
+    name: Version Bump Check
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check version was bumped
+        run: |
+          base_version=$(git show origin/${{ github.base_ref }}:package.json | python3 -c "import json,sys; print(json.load(sys.stdin)['version'])")
+          pr_version=$(python3 -c "import json; print(json.load(open('package.json'))['version'])")
+          echo "Base: $base_version  PR: $pr_version"
+          if [ "$base_version" = "$pr_version" ]; then
+            echo "ERROR: package.json version was not bumped (still $pr_version). Bump the version before merging." >&2
+            exit 1
+          fi
+
+  # ── Changelog check (PRs only) ────────────────────────────────────────────────
+  changelog-check:
+    name: Changelog Check
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check CHANGELOG was updated
+        run: |
+          if git diff origin/${{ github.base_ref }}...HEAD -- CHANGELOG.md | grep -q '^+'; then
+            echo "CHANGELOG.md updated — OK"
+          else
+            echo "ERROR: CHANGELOG.md was not updated. Add an entry for your changes." >&2
+            exit 1
+          fi
+
+  # ── Release (main push only) ──────────────────────────────────────────────────
   release:
+    name: Release
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: checks
+    needs: [lint, type-check, build]
     runs-on: macos-26
     permissions:
       contents: write
@@ -160,7 +238,9 @@ jobs:
             --title "$TAG" \
             --verify-tag
 
+  # ── Update Homebrew cask (main push, after release) ───────────────────────────
   update-cask:
+    name: Update Cask
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: release
     runs-on: ubuntu-latest
