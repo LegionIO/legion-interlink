@@ -76,9 +76,11 @@ class ServiceManager: ObservableObject {
 
     static let daemonPort = 4567
     private let daemonHealthURL = URL(string: "http://localhost:\(daemonPort)/api/ready")!
-    private let logPath = "/opt/homebrew/var/log/legion/legion.log"
+    private let legionHome: String
+    private let logPath: String
     private let agenticMarkerPath: String
     private var timer: Timer?
+    private var logTimer: Timer?
 
     /// Resolved once at init — no repeated filesystem checks.
     private let resolvedBrewPath: String
@@ -100,6 +102,8 @@ class ServiceManager: ObservableObject {
 
     init() {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
+        self.legionHome = "\(home)/.legionio"
+        self.logPath = "\(home)/.legionio/legionio/logs/legion.log"
         self.agenticMarkerPath = "\(home)/.legionio/.packs/agentic"
         self.resolvedBrewPath = Self.findBrewPath()
         self.resolvedLegionioPath = Self.findLegionioPath()
@@ -134,6 +138,7 @@ class ServiceManager: ObservableObject {
         suppressPolling = true
         let brew = resolvedBrewPath
         let legionio = resolvedLegionioPath
+        let home = legionHome
         let name = service.brewName
         let healthURL = daemonHealthURL
         Task.detached {
@@ -141,7 +146,8 @@ class ServiceManager: ObservableObject {
                 Self.runProcessAsync(brew, arguments: ["services", "stop", "legionio"])
                 try? await Task.sleep(nanoseconds: 500_000_000)
                 // legionio start blocks (runs in foreground), so fire-and-forget
-                Self.runProcessAsync(legionio, arguments: ["start"])
+                // Start from ~/.legionio so relative log paths resolve correctly
+                Self.runProcessAsync(legionio, arguments: ["start"], workingDirectory: home)
                 await Self.waitForServiceReady(service: service, brew: brew, healthURL: healthURL, target: true, timeout: 30)
             } else {
                 Self.runProcess(brew, arguments: ["services", "start", name])
@@ -186,6 +192,7 @@ class ServiceManager: ObservableObject {
         suppressPolling = true
         let brew = resolvedBrewPath
         let legionio = resolvedLegionioPath
+        let home = legionHome
         let healthURL = daemonHealthURL
         Task.detached {
             // Stop
@@ -193,9 +200,9 @@ class ServiceManager: ObservableObject {
             Self.runProcessAsync(brew, arguments: ["services", "stop", "legionio"])
             Self.killProcessOnPort(4567)
             await Self.waitForServiceReady(service: .legionio, brew: brew, healthURL: healthURL, target: false, timeout: 30)
-            // Start
+            // Start from ~/.legionio so relative log paths resolve correctly
             await self.updateServiceStatus(.legionio, .starting)
-            Self.runProcess(legionio, arguments: ["start"])
+            Self.runProcess(legionio, arguments: ["start"], workingDirectory: home)
             await Self.waitForServiceReady(service: .legionio, brew: brew, healthURL: healthURL, target: true, timeout: 30)
             await MainActor.run { self.suppressPolling = false }
             await self.checkAllServices()
@@ -241,6 +248,33 @@ class ServiceManager: ObservableObject {
             let content = Self.tailFile(path: path, lines: 200)
             await MainActor.run { self.logContents = content }
         }
+    }
+
+    func clearLogs() {
+        logContents = ""
+        let path = logPath
+        Task.detached {
+            // Truncate rather than delete so the daemon's open file handle stays valid
+            if let fh = FileHandle(forWritingAtPath: path) {
+                fh.truncateFile(atOffset: 0)
+                fh.closeFile()
+            }
+        }
+    }
+
+    /// Start fast 1-second log polling (call when Logs tab is visible).
+    func startFastLogPolling() {
+        guard logTimer == nil else { return }
+        logTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in self.refreshLogs() }
+        }
+    }
+
+    /// Stop fast log polling, revert to normal 5-second cycle.
+    func stopFastLogPolling() {
+        logTimer?.invalidate()
+        logTimer = nil
     }
 
     // MARK: - Process Execution (for onboarding)
@@ -302,10 +336,13 @@ class ServiceManager: ObservableObject {
     // MARK: - Static helpers (run off main thread)
 
     /// Run a command synchronously. Call from Task.detached only.
-    private nonisolated static func runProcess(_ executable: String, arguments: [String]) {
+    private nonisolated static func runProcess(_ executable: String, arguments: [String], workingDirectory: String? = nil) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
+        if let workingDirectory {
+            process.currentDirectoryURL = URL(fileURLWithPath: workingDirectory)
+        }
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         try? process.run()
@@ -314,10 +351,13 @@ class ServiceManager: ObservableObject {
 
     /// Fire-and-forget: launch a process without waiting for it to finish.
     /// Use for commands that may hang (e.g. `brew services stop legionio`).
-    private nonisolated static func runProcessAsync(_ executable: String, arguments: [String]) {
+    private nonisolated static func runProcessAsync(_ executable: String, arguments: [String], workingDirectory: String? = nil) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
+        if let workingDirectory {
+            process.currentDirectoryURL = URL(fileURLWithPath: workingDirectory)
+        }
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         try? process.run()
@@ -536,5 +576,6 @@ class ServiceManager: ObservableObject {
 
     deinit {
         timer?.invalidate()
+        logTimer?.invalidate()
     }
 }

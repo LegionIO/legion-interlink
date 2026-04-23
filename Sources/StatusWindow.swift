@@ -3,7 +3,7 @@ import AppKit
 
 // MARK: - Dark Terminal Theme
 
-private enum TerminalTheme {
+enum TerminalTheme {
     static let bg = Color(red: 0.08, green: 0.08, blue: 0.10)
     static let surfaceBg = Color(red: 0.11, green: 0.11, blue: 0.14)
     static let cardBg = Color(red: 0.14, green: 0.14, blue: 0.17)
@@ -24,6 +24,212 @@ struct ChatMessage: Identifiable {
     let role: String // "user" or "assistant"
     let content: String
     let timestamp: Date
+}
+
+// MARK: - Multiline Chat Input (NSViewRepresentable)
+
+struct ChatInputView: NSViewRepresentable {
+    @Binding var text: String
+    @Binding var height: CGFloat
+    var isFocused: FocusState<Bool>.Binding
+    var isDisabled: Bool
+    var onSubmit: () -> Void
+    var onHistoryUp: (() -> Void)? = nil
+    var onHistoryDown: (() -> Void)? = nil
+
+    static let minHeight: CGFloat = 20
+    static let maxHeight: CGFloat = 120
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSScrollView()
+        scrollView.hasVerticalScroller = false
+        scrollView.hasHorizontalScroller = false
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+
+        let textView = ChatNSTextView()
+        textView.delegate = context.coordinator
+        textView.onSubmit = onSubmit
+        textView.onHistoryUp = onHistoryUp
+        textView.onHistoryDown = onHistoryDown
+        textView.isRichText = false
+        textView.allowsUndo = true
+        textView.drawsBackground = false
+        textView.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        textView.textColor = NSColor(TerminalTheme.text)
+        textView.insertionPointColor = TerminalCursor.color
+        textView.isEditable = !isDisabled
+        textView.isSelectable = true
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.textContainerInset = NSSize(width: 0, height: 2)
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.lineBreakMode = .byWordWrapping
+        textView.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        textView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        scrollView.documentView = textView
+        context.coordinator.textView = textView
+
+        // Auto-focus when the view is added to a window
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            if let window = textView.window {
+                window.makeFirstResponder(textView)
+            }
+        }
+
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        guard let textView = scrollView.documentView as? ChatNSTextView else { return }
+
+        if textView.string != text {
+            textView.string = text
+            context.coordinator.recalcHeight(textView)
+        }
+
+        textView.onSubmit = onSubmit
+        textView.onHistoryUp = onHistoryUp
+        textView.onHistoryDown = onHistoryDown
+        textView.isEditable = !isDisabled
+
+        if isFocused.wrappedValue {
+            DispatchQueue.main.async {
+                guard let window = textView.window else { return }
+                if window.firstResponder !== textView {
+                    window.makeFirstResponder(textView)
+                }
+                // Force cursor redraw after focus
+                textView.needsDisplay = true
+            }
+        }
+    }
+
+    class Coordinator: NSObject, NSTextViewDelegate {
+        var parent: ChatInputView
+        weak var textView: NSTextView?
+
+        init(_ parent: ChatInputView) {
+            self.parent = parent
+        }
+
+        func textDidChange(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            parent.text = textView.string
+            recalcHeight(textView)
+        }
+
+        func recalcHeight(_ textView: NSTextView) {
+            guard let container = textView.textContainer,
+                  let layoutManager = textView.layoutManager else { return }
+            layoutManager.ensureLayout(for: container)
+            let usedRect = layoutManager.usedRect(for: container)
+            let inset = textView.textContainerInset
+            let newHeight = min(
+                max(usedRect.height + inset.height * 2, ChatInputView.minHeight),
+                ChatInputView.maxHeight
+            )
+            DispatchQueue.main.async {
+                self.parent.height = newHeight
+            }
+        }
+    }
+}
+
+// Custom NSTextView to intercept Enter vs Shift/Option+Enter
+private class ChatNSTextView: NSTextView {
+    var onSubmit: (() -> Void)?
+    var onHistoryUp: (() -> Void)?
+    var onHistoryDown: (() -> Void)?
+
+    override var acceptsFirstResponder: Bool { true }
+
+    override func becomeFirstResponder() -> Bool {
+        let result = super.becomeFirstResponder()
+        insertionPointColor = TerminalCursor.color
+        // Kick the insertion point state so drawInsertionPoint gets called
+        super.updateInsertionPointStateAndRestartTimer(false)
+        needsDisplay = true
+        return result
+    }
+
+    // Draw a solid, non-blinking block cursor
+    override func drawInsertionPoint(in rect: NSRect, color: NSColor, turnedOn flag: Bool) {
+        // Ignore the turnedOn flag entirely — always draw
+        var blockRect = rect
+        blockRect.size.width = TerminalCursor.width
+        TerminalCursor.color.setFill()
+        NSBezierPath(rect: blockRect).fill()
+    }
+
+    override func setNeedsDisplay(_ rect: NSRect, avoidAdditionalLayout flag: Bool) {
+        var widened = rect
+        widened.size.width += TerminalCursor.width + 2
+        super.setNeedsDisplay(widened, avoidAdditionalLayout: flag)
+    }
+
+    // Kill the blink timer — always pass false to prevent restart,
+    // but still call super so macOS tracks insertion point position
+    override func updateInsertionPointStateAndRestartTimer(_ restartFlag: Bool) {
+        super.updateInsertionPointStateAndRestartTimer(false)
+        needsDisplay = true
+    }
+
+    override func keyDown(with event: NSEvent) {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let isReturn = event.keyCode == 36
+        let isUpArrow = event.keyCode == 126
+        let isDownArrow = event.keyCode == 125
+
+        if isReturn {
+            let hasShift = flags.contains(.shift)
+            let hasOption = flags.contains(.option)
+
+            if hasShift || hasOption {
+                // Shift+Enter or Option+Enter: insert newline (expand)
+                insertNewline(nil)
+                return
+            } else if flags.isEmpty || flags == .numericPad {
+                // Plain Enter: submit message
+                onSubmit?()
+                return
+            }
+        }
+
+        // Up/Down arrow: cycle history when the input is a single line
+        // (no newlines), or when the cursor is on the first/last line
+        if flags.isEmpty || flags == .numericPad {
+            if isUpArrow, let onHistoryUp {
+                let isSingleLine = !string.contains("\n")
+                let cursorAtFirstLine = isSingleLine || selectedRange().location == 0
+                    || string[string.startIndex..<string.index(string.startIndex, offsetBy: min(selectedRange().location, string.count))].contains("\n") == false
+                if isSingleLine || cursorAtFirstLine {
+                    onHistoryUp()
+                    return
+                }
+            }
+            if isDownArrow, let onHistoryDown {
+                let isSingleLine = !string.contains("\n")
+                let cursorAtLastLine: Bool = {
+                    let pos = selectedRange().location
+                    if pos >= string.count { return true }
+                    let remaining = string[string.index(string.startIndex, offsetBy: pos)...]
+                    return !remaining.contains("\n")
+                }()
+                if isSingleLine || cursorAtLastLine {
+                    onHistoryDown()
+                    return
+                }
+            }
+        }
+
+        super.keyDown(with: event)
+    }
 }
 
 // MARK: - Pulsing Status Text
@@ -84,6 +290,9 @@ struct StatusWindowView: View {
     private static let tabChat = 0
     private static let tabLogs = 1
     private static let tabServices = 2
+    private static let tabExtensions = 3
+    private static let tabWorkers = 4
+    private static let tabSettings = 5
 
     var body: some View {
         VStack(spacing: 0) {
@@ -96,10 +305,13 @@ struct StatusWindowView: View {
             // Tab content
             Group {
                 switch selectedTab {
+                case Self.tabServices: ServicesTab()
                 case Self.tabChat: ChatTab()
                 case Self.tabLogs: LogsTab()
-                case Self.tabServices: ServicesTab()
-                default: ChatTab()
+                case Self.tabExtensions: ExtensionsTab()
+                case Self.tabWorkers: WorkersTab()
+                case Self.tabSettings: DaemonSettingsTab()
+                default: ServicesTab()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -112,6 +324,8 @@ struct StatusWindowView: View {
                 hasAppeared = true
                 if manager.overallStatus != .online {
                     selectedTab = Self.tabServices
+                } else {
+                    selectedTab = Self.tabChat
                 }
             }
         }
@@ -229,11 +443,15 @@ struct StatusWindowView: View {
     // MARK: - Tab Bar
 
     private var tabBar: some View {
-        HStack(spacing: 0) {
-            tabButton(title: "Chat", icon: "bubble.left.and.bubble.right", index: 0)
-            tabButton(title: "Logs", icon: "terminal", index: 1)
-            tabButton(title: "Services", icon: "server.rack", index: 2)
-            Spacer()
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 0) {
+                tabButton(title: "Chat", icon: "bubble.left.and.bubble.right", index: Self.tabChat)
+                tabButton(title: "Logs", icon: "terminal", index: Self.tabLogs)
+                tabButton(title: "Services", icon: "server.rack", index: Self.tabServices)
+                tabButton(title: "Extensions", icon: "puzzlepiece.extension", index: Self.tabExtensions)
+                tabButton(title: "Workers", icon: "gearshape.2", index: Self.tabWorkers)
+                tabButton(title: "Settings", icon: "gearshape", index: Self.tabSettings)
+            }
         }
         .background(TerminalTheme.bg)
         .overlay(
@@ -256,6 +474,7 @@ struct StatusWindowView: View {
             .foregroundColor(isSelected ? TerminalTheme.accent : TerminalTheme.textDim)
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
+            .contentShape(Rectangle())
             .background(isSelected ? TerminalTheme.surfaceBg : Color.clear)
             .overlay(
                 Rectangle()
@@ -265,6 +484,7 @@ struct StatusWindowView: View {
             )
         }
         .buttonStyle(.plain)
+        .pointerCursor()
     }
 }
 
@@ -273,21 +493,76 @@ struct StatusWindowView: View {
 struct ServicesTab: View {
     @EnvironmentObject var manager: ServiceManager
 
+    private var anyTransitioning: Bool {
+        manager.services.contains { $0.status == .starting || $0.status == .stopping }
+    }
+
+    private var allRunning: Bool {
+        manager.services.allSatisfy { $0.status == .running }
+    }
+
+    private var allStopped: Bool {
+        manager.services.allSatisfy { $0.status == .stopped || $0.status == .unknown }
+    }
+
     var body: some View {
-        ScrollView {
-            VStack(spacing: 12) {
-                // Service Cards
-                ForEach(manager.services) { service in
-                    if service.name == .legionio {
-                        daemonCard(service)
-                    } else {
-                        serviceCard(service)
+        VStack(spacing: 0) {
+            servicesHeader
+
+            ScrollView {
+                VStack(spacing: 12) {
+                    // Service Cards
+                    ForEach(manager.services) { service in
+                        if service.name == .legionio {
+                            daemonCard(service)
+                        } else {
+                            serviceCard(service)
+                        }
                     }
                 }
+                .padding(16)
             }
-            .padding(16)
         }
         .background(TerminalTheme.bg)
+    }
+
+    // MARK: - Header
+
+    private var servicesHeader: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "server.rack")
+                .font(.system(size: 11))
+                .foregroundColor(TerminalTheme.accent)
+
+            Text("SERVICES")
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .foregroundColor(TerminalTheme.textDim)
+
+            Spacer()
+
+            HStack(spacing: 6) {
+                terminalButton("start all", color: TerminalTheme.green) {
+                    manager.startAll()
+                }
+                .disabled(anyTransitioning || allRunning)
+                .opacity(anyTransitioning || allRunning ? 0.4 : 1)
+
+                terminalButton("stop all", color: TerminalTheme.red) {
+                    manager.stopAll()
+                }
+                .disabled(anyTransitioning || allStopped)
+                .opacity(anyTransitioning || allStopped ? 0.4 : 1)
+            }
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 36)
+        .background(TerminalTheme.surfaceBg)
+        .overlay(
+            Rectangle()
+                .fill(TerminalTheme.border)
+                .frame(height: 1),
+            alignment: .bottom
+        )
     }
 
     // MARK: - Daemon Card (LegionIO with components)
@@ -463,6 +738,7 @@ struct ServicesTab: View {
                 .cornerRadius(4)
         }
         .buttonStyle(.plain)
+        .pointerCursor()
     }
 
 }
@@ -471,20 +747,34 @@ struct ServicesTab: View {
 
 struct ChatTab: View {
     @EnvironmentObject var manager: ServiceManager
-    @State private var messages: [ChatMessage] = []
+    @StateObject private var store = ChatStore.shared
     @State private var inputText: String = ""
     @State private var isStreaming = false
+    @State private var inputHeight: CGFloat = ChatInputView.minHeight
+    @FocusState private var isInputFocused: Bool
+
+    /// Index into the user message history. -1 means "not browsing history" (showing current draft).
+    @State private var historyIndex: Int = -1
+    /// Saves the in-progress draft so it can be restored after cycling through history.
+    @State private var savedDraft: String = ""
+
+    private var userMessages: [String] {
+        store.messages.filter { $0.role == "user" }.map(\.content)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
+            // Header bar
+            chatHeader
+
             // Messages area
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 12) {
-                        if messages.isEmpty {
+                        if store.messages.isEmpty {
                             emptyState
                         }
-                        ForEach(messages) { message in
+                        ForEach(store.messages) { message in
                             chatBubble(message)
                         }
                         if isStreaming {
@@ -494,7 +784,7 @@ struct ChatTab: View {
                     .padding(16)
                     .id("chatBottom")
                 }
-                .onChange(of: messages.count) { _ in
+                .onChange(of: store.messages.count) { _ in
                     withAnimation {
                         proxy.scrollTo("chatBottom", anchor: .bottom)
                     }
@@ -505,6 +795,79 @@ struct ChatTab: View {
             // Input bar
             inputBar
         }
+        .onAppear {
+            // Delay slightly so the NSTextView has been added to the window
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                isInputFocused = true
+            }
+        }
+    }
+
+    // MARK: - Header
+
+    private var chatHeader: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "bubble.left.and.bubble.right")
+                .font(.system(size: 11))
+                .foregroundColor(TerminalTheme.accent)
+
+            Text("CHAT")
+                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                .foregroundColor(TerminalTheme.textDim)
+
+            Text("— LLM inference")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(TerminalTheme.textDim.opacity(0.5))
+
+            if !store.messages.isEmpty {
+                Text("\(store.messages.count)")
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundColor(TerminalTheme.accent)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(TerminalTheme.accent.opacity(0.1))
+                    .cornerRadius(3)
+            }
+
+            Spacer()
+
+            Button(action: {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    store.clearAll()
+                    inputText = ""
+                    inputHeight = ChatInputView.minHeight
+                }
+            }) {
+                HStack(spacing: 4) {
+                    Image(systemName: "xmark.circle")
+                        .font(.system(size: 10))
+                    Text("clear chat")
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                }
+                .foregroundColor(TerminalTheme.textDim)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(TerminalTheme.textDim.opacity(0.1))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 3)
+                        .stroke(TerminalTheme.textDim.opacity(0.2), lineWidth: 1)
+                )
+                .cornerRadius(3)
+            }
+            .buttonStyle(.plain)
+            .pointerCursor()
+            .disabled(store.messages.isEmpty && !isStreaming)
+            .opacity(store.messages.isEmpty && !isStreaming ? 0.4 : 1.0)
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 36)
+        .background(TerminalTheme.surfaceBg)
+        .overlay(
+            Rectangle()
+                .fill(TerminalTheme.border)
+                .frame(height: 1),
+            alignment: .bottom
+        )
     }
 
     private var emptyState: some View {
@@ -586,41 +949,88 @@ struct ChatTab: View {
     }
 
     private var inputBar: some View {
-        HStack(spacing: 10) {
-            Text(">")
-                .font(.system(size: 14, weight: .bold, design: .monospaced))
-                .foregroundColor(TerminalTheme.accent)
+        VStack(spacing: 0) {
+            // Top separator
+            Rectangle()
+                .fill(TerminalTheme.border)
+                .frame(height: 1)
 
-            TextField("Send a message...", text: $inputText)
-                .textFieldStyle(.plain)
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundColor(TerminalTheme.text)
-                .onSubmit { sendMessage() }
-                .disabled(isStreaming)
+            HStack(alignment: .top, spacing: 10) {
+                Text(">")
+                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .foregroundColor(TerminalTheme.accent)
+                    .padding(.top, 1)
 
-            if isStreaming {
-                ProgressView()
-                    .controlSize(.small)
-                    .scaleEffect(0.7)
-            } else {
+                ChatInputView(
+                    text: $inputText,
+                    height: $inputHeight,
+                    isFocused: $isInputFocused,
+                    isDisabled: false,
+                    onSubmit: sendMessage,
+                    onHistoryUp: historyUp,
+                    onHistoryDown: historyDown
+                )
+                .frame(height: inputHeight)
+
+                if isStreaming {
+                    ProgressView()
+                        .controlSize(.small)
+                        .scaleEffect(0.7)
+                        .padding(.top, 2)
+                }
+
                 Button(action: sendMessage) {
                     Image(systemName: "arrow.up.circle.fill")
                         .font(.system(size: 18))
                         .foregroundColor(inputText.isEmpty ? TerminalTheme.textDim : TerminalTheme.accent)
                 }
                 .buttonStyle(.plain)
+                .pointerCursor()
                 .disabled(inputText.isEmpty)
+                .padding(.top, 2)
             }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(TerminalTheme.surfaceBg)
-        .overlay(
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+
+            // Bottom separator
             Rectangle()
                 .fill(TerminalTheme.border)
-                .frame(height: 1),
-            alignment: .top
-        )
+                .frame(height: 1)
+        }
+        .background(TerminalTheme.surfaceBg)
+        .padding(.bottom, 12)
+    }
+
+    // MARK: - History Navigation
+
+    private func historyUp() {
+        let history = userMessages
+        guard !history.isEmpty else { return }
+
+        if historyIndex == -1 {
+            // Entering history — save current draft
+            savedDraft = inputText
+            historyIndex = history.count - 1
+        } else if historyIndex > 0 {
+            historyIndex -= 1
+        } else {
+            return // already at oldest
+        }
+        inputText = history[historyIndex]
+    }
+
+    private func historyDown() {
+        let history = userMessages
+        guard historyIndex >= 0 else { return }
+
+        if historyIndex < history.count - 1 {
+            historyIndex += 1
+            inputText = history[historyIndex]
+        } else {
+            // Past newest — restore draft
+            historyIndex = -1
+            inputText = savedDraft
+        }
     }
 
     private func sendMessage() {
@@ -628,9 +1038,13 @@ struct ChatTab: View {
         guard !text.isEmpty else { return }
 
         let userMessage = ChatMessage(role: "user", content: text, timestamp: Date())
-        messages.append(userMessage)
+        store.append(userMessage)
         inputText = ""
+        inputHeight = ChatInputView.minHeight
+        historyIndex = -1
+        savedDraft = ""
         isStreaming = true
+        isInputFocused = true
 
         Task {
             let response = await callInferenceAPI(prompt: text)
@@ -640,8 +1054,9 @@ struct ChatTab: View {
                     content: response,
                     timestamp: Date()
                 )
-                messages.append(assistantMessage)
+                store.append(assistantMessage)
                 isStreaming = false
+                isInputFocused = true
             }
         }
     }
@@ -655,7 +1070,7 @@ struct ChatTab: View {
 
         // Build conversation history for context
         var conversationMessages: [[String: String]] = []
-        for msg in messages {
+        for msg in store.messages {
             conversationMessages.append([
                 "role": msg.role,
                 "content": msg.content
@@ -711,6 +1126,40 @@ struct ChatTab: View {
     }
 }
 
+// MARK: - Terminal Checkbox Style
+
+struct TerminalCheckboxStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 5) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 3.5)
+                    .fill(configuration.isOn ? TerminalTheme.accent : TerminalTheme.cardBg)
+                    .frame(width: 14, height: 14)
+
+                RoundedRectangle(cornerRadius: 3.5)
+                    .stroke(
+                        configuration.isOn ? TerminalTheme.accent : TerminalTheme.textDim.opacity(0.3),
+                        lineWidth: 1
+                    )
+                    .frame(width: 14, height: 14)
+
+                if configuration.isOn {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundColor(.white)
+                }
+            }
+            .contentShape(Rectangle())
+            .animation(.easeInOut(duration: 0.15), value: configuration.isOn)
+
+            configuration.label
+        }
+        .onTapGesture {
+            configuration.isOn.toggle()
+        }
+    }
+}
+
 // MARK: - Logs Tab
 
 struct LogsTab: View {
@@ -725,11 +1174,11 @@ struct LogsTab: View {
                     .font(.system(size: 11))
                     .foregroundColor(TerminalTheme.accent)
 
-                Text("DAEMON LOG")
+                Text("LOGS")
                     .font(.system(size: 10, weight: .bold, design: .monospaced))
                     .foregroundColor(TerminalTheme.textDim)
 
-                Text("— /opt/homebrew/var/log/legion/legion.log")
+                Text("— ~/.legionio/legionio/logs/legion.log")
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundColor(TerminalTheme.textDim.opacity(0.5))
 
@@ -740,14 +1189,13 @@ struct LogsTab: View {
                         .font(.system(size: 9, design: .monospaced))
                         .foregroundColor(TerminalTheme.textDim)
                 }
-                .toggleStyle(.checkbox)
-                .controlSize(.small)
+                .toggleStyle(TerminalCheckboxStyle())
 
-                Button(action: { manager.logContents = "" }) {
+                Button(action: { manager.clearLogs() }) {
                     HStack(spacing: 4) {
                         Image(systemName: "xmark.circle")
                             .font(.system(size: 10))
-                        Text("clear")
+                        Text("clear logs")
                             .font(.system(size: 9, weight: .medium, design: .monospaced))
                     }
                     .foregroundColor(TerminalTheme.textDim)
@@ -761,28 +1209,11 @@ struct LogsTab: View {
                     .cornerRadius(3)
                 }
                 .buttonStyle(.plain)
-
-                Button(action: manager.refreshLogs) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 10))
-                        Text("refresh")
-                            .font(.system(size: 9, weight: .medium, design: .monospaced))
-                    }
-                    .foregroundColor(TerminalTheme.accent)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(TerminalTheme.accent.opacity(0.1))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 3)
-                            .stroke(TerminalTheme.accent.opacity(0.2), lineWidth: 1)
-                    )
-                    .cornerRadius(3)
-                }
-                .buttonStyle(.plain)
+                .pointerCursor()
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
+            .frame(height: 36)
             .background(TerminalTheme.surfaceBg)
             .overlay(
                 Rectangle()
@@ -793,7 +1224,7 @@ struct LogsTab: View {
 
             // Log content
             ScrollViewReader { proxy in
-                ScrollView([.horizontal, .vertical]) {
+                ScrollView(.vertical) {
                     Text(manager.logContents.isEmpty ? "waiting for log output..." : manager.logContents)
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundColor(
@@ -801,18 +1232,31 @@ struct LogsTab: View {
                                 ? TerminalTheme.textDim
                                 : TerminalTheme.green.opacity(0.85)
                         )
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .textSelection(.enabled)
                         .padding(12)
+
+                    Color.clear
+                        .frame(height: 1)
                         .id("logEnd")
                 }
                 .background(TerminalTheme.bg)
                 .onChange(of: manager.logContents) { _ in
                     if autoScroll {
-                        proxy.scrollTo("logEnd", anchor: .bottom)
+                        withAnimation(.easeOut(duration: 0.1)) {
+                            proxy.scrollTo("logEnd", anchor: .bottom)
+                        }
                     }
                 }
             }
         }
+        .onAppear { manager.startFastLogPolling() }
+        .onDisappear { manager.stopFastLogPolling() }
     }
 }
+
+// NOTE: Tab views (ExtensionsTab, WorkersTab, TasksTab, EventsTab, DaemonSettingsTab)
+// are defined in their own dedicated files.
+

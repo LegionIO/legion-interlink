@@ -29,7 +29,7 @@ extension OverallStatus {
 
 // MARK: - AppDelegate
 
-class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelegate {
     var statusItem: NSStatusItem?
     var statusWindow: NSWindow?
     var onboardingWindow: NSWindow?
@@ -159,11 +159,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: - Window Management
 
     @MainActor @objc func showDashboard() {
+        // Temporarily become a regular app so we can accept key window / keyboard focus
+        NSApplication.shared.setActivationPolicy(.regular)
         NSApplication.shared.activate(ignoringOtherApps: true)
 
         if let window = statusWindow, window.isVisible {
-            window.orderFrontRegardless()
-            window.makeKey()
+            window.makeKeyAndOrderFront(nil)
             return
         }
 
@@ -182,8 +183,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         window.center()
         window.makeKeyAndOrderFront(nil)
         window.isReleasedWhenClosed = false
+        window.delegate = self
 
         statusWindow = window
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        guard let closingWindow = notification.object as? NSWindow else { return }
+        if closingWindow === statusWindow {
+            // Revert to accessory app (hide from Dock) when dashboard closes
+            NSApplication.shared.setActivationPolicy(.accessory)
+        }
     }
 
     @MainActor func showOnboarding() {
