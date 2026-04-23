@@ -78,13 +78,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
         }
 
         // Observe status changes to update the icon
-        Task { @MainActor in
-            // Poll the icon every second to keep it in sync
-            Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+        // Poll every second on main run loop
+        Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
                 guard let self else { return }
-                Task { @MainActor in
-                    self.statusItem?.button?.image = self.menuBarIcon(for: ServiceManager.shared.overallStatus)
-                }
+                self.statusItem?.button?.image = self.menuBarIcon(for: ServiceManager.shared.overallStatus)
             }
         }
     }
@@ -119,7 +117,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
         menu.addItem(.separator())
 
         let launchItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLaunchAtLogin(_:)), keyEquivalent: "")
-        if let service = try? SMAppService.mainApp.status, service == .enabled {
+        if SMAppService.mainApp.status == .enabled {
             launchItem.state = .on
         }
         menu.addItem(launchItem)
