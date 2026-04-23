@@ -9,67 +9,17 @@ concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
-# ── Shared setup anchor ────────────────────────────────────────────────────────
-# Each job that needs Node runs these three steps. Keeping them DRY via YAML
-# anchors isn't supported in GitHub Actions, so each job repeats the three lines.
-# pnpm's content-addressable store is cached by setup-node so installs are fast.
-
 jobs:
-  # ── Lint ──────────────────────────────────────────────────────────────────────
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
+  checks:
+    name: Build & Verify
+    runs-on: macos-26
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10.22.0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm lint
+      - name: Build (debug)
+        run: swift build
 
-  # ── Type check ────────────────────────────────────────────────────────────────
-  type-check:
-    name: Type Check
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10.22.0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm type-check
-
-  # ── Build ─────────────────────────────────────────────────────────────────────
-  build:
-    name: Build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10.22.0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm build
-
-  # ── Version bump check (PRs only) ─────────────────────────────────────────────
   version-check:
     name: Version Bump Check
     if: github.event_name == 'pull_request'
@@ -82,15 +32,14 @@ jobs:
           fetch-depth: 0
       - name: Check version was bumped
         run: |
-          base_version=$(git show ${{ github.event.pull_request.base.sha }}:package.json | python3 -c "import json,sys; print(json.load(sys.stdin)['version'])")
-          pr_version=$(python3 -c "import json; print(json.load(open('package.json'))['version'])")
+          base_version=$(git show ${{ github.event.pull_request.base.sha }}:VERSION | tr -d '[:space:]')
+          pr_version=$(cat VERSION | tr -d '[:space:]')
           echo "Base: $base_version  PR: $pr_version"
           if [ "$base_version" = "$pr_version" ]; then
-            echo "ERROR: package.json version was not bumped (still $pr_version). Bump the version before merging." >&2
+            echo "ERROR: VERSION was not bumped (still $pr_version). Bump the version before merging." >&2
             exit 1
           fi
 
-  # ── Changelog check (PRs only) ────────────────────────────────────────────────
   changelog-check:
     name: Changelog Check
     if: github.event_name == 'pull_request'
@@ -110,43 +59,31 @@ jobs:
             exit 1
           fi
 
-  # ── Release (main push only) ──────────────────────────────────────────────────
   release:
     name: Release
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [lint, type-check, build]
+    needs: [checks]
     runs-on: macos-26
     permissions:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
-      CSC_LINK: ${{ secrets.CSC_LINK }}
-      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
       APPLE_ID: ${{ secrets.APPLE_ID }}
       APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
-      asset_name: ${{ steps.artifact.outputs.name }}
+      dmg_name: ${{ steps.package.outputs.dmg_name }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10.22.0
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-
       - name: Resolve version
         id: version
         run: |
-          version="$(node -p "require('./package.json').version")"
+          version="$(cat VERSION | tr -d '[:space:]')"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=v$version" >> "$GITHUB_OUTPUT"
 
@@ -166,79 +103,145 @@ jobs:
         if: steps.tag_check.outputs.exists == 'true'
         run: echo "Tag ${{ steps.version.outputs.tag }} already exists — skipping release."
 
-      - run: pnpm install --frozen-lockfile
+      # Build universal binary (arm64 + x86_64)
+      - name: Build arm64
         if: steps.tag_check.outputs.exists == 'false'
+        run: swift build -c release --arch arm64
 
-      - run: pnpm build:mac
+      - name: Build x86_64
         if: steps.tag_check.outputs.exists == 'false'
+        run: swift build -c release --arch x86_64
 
-      - name: Verify Swift helper binary
-        if: steps.tag_check.outputs.exists == 'false'
-        run: |
-          APP_PATH="$(find dist/mac-arm64 -maxdepth 1 -name '*.app' -type d | head -n 1)"
-          HELPER="$APP_PATH/Contents/Resources/bin/LocalMacosHelper"
-
-          if [ ! -x "$HELPER" ]; then
-            echo "ERROR: LocalMacosHelper binary not found or not executable at $HELPER" >&2
-            exit 1
-          fi
-
-          echo "Helper binary: $(ls -la "$HELPER")"
-          echo "Architectures: $(lipo -archs "$HELPER")"
-          echo "Code signature:"
-          codesign -dvv "$HELPER" 2>&1
-
-          RESULT=$("$HELPER" permissions 2>&1)
-          echo "Permissions check output: $RESULT"
-
-          if ! echo "$RESULT" | python3 -c "import sys,json; d=json.load(sys.stdin); assert d.get('ok') is True"; then
-            echo "ERROR: LocalMacosHelper permissions check failed" >&2
-            exit 1
-          fi
-
-      - name: Verify code signature
+      - name: Create universal binary
         if: steps.tag_check.outputs.exists == 'false'
         run: |
-          APP_PATH="$(find dist/mac-arm64 -maxdepth 1 -name '*.app' -type d | head -n 1)"
-          if [ -z "$APP_PATH" ]; then
-            echo "ERROR: No .app bundle found in dist/mac-arm64/" >&2
-            exit 1
-          fi
+          mkdir -p dist/bin
+          lipo -create \
+            .build/arm64-apple-macosx/release/LegionInterlink \
+            .build/x86_64-apple-macosx/release/LegionInterlink \
+            -output dist/bin/LegionInterlink
+          echo "Architectures: $(lipo -archs dist/bin/LegionInterlink)"
 
-          echo "Verifying signature: $APP_PATH"
-          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
-
-          echo ""
-          echo "Checking notarization staple:"
-          xcrun stapler validate "$APP_PATH" || echo "Warning: staple not found (notarization may still be processing)"
-
-      - name: Locate DMG artifact
+      # Create .app bundle
+      - name: Package .app bundle
         if: steps.tag_check.outputs.exists == 'false'
-        id: artifact
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          artifact_path="$(find dist -maxdepth 1 -type f -name '*.dmg' | head -n 1)"
+          APP="dist/Legion Interlink.app"
+          mkdir -p "$APP/Contents/MacOS"
+          mkdir -p "$APP/Contents/Resources"
 
-          if [ -z "$artifact_path" ]; then
-            echo "No DMG artifact found in dist/." >&2
-            exit 1
+          cp dist/bin/LegionInterlink "$APP/Contents/MacOS/LegionInterlink"
+          cp build/icon.icns "$APP/Contents/Resources/AppIcon.icns"
+
+          cat > "$APP/Contents/Info.plist" << PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleName</key>
+              <string>Legion Interlink</string>
+              <key>CFBundleDisplayName</key>
+              <string>Legion Interlink</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.legion.interlink</string>
+              <key>CFBundleVersion</key>
+              <string>${VERSION}</string>
+              <key>CFBundleShortVersionString</key>
+              <string>${VERSION}</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>CFBundleExecutable</key>
+              <string>LegionInterlink</string>
+              <key>CFBundleIconFile</key>
+              <string>AppIcon</string>
+              <key>LSMinimumSystemVersion</key>
+              <string>13.0</string>
+              <key>LSUIElement</key>
+              <true/>
+              <key>NSHighResolutionCapable</key>
+              <true/>
+          </dict>
+          </plist>
+          PLIST
+
+      # Code sign
+      - name: Code sign
+        if: steps.tag_check.outputs.exists == 'false'
+        run: |
+          APP="dist/Legion Interlink.app"
+
+          # Import signing certificate from secrets
+          if [ -n "${{ secrets.CSC_LINK }}" ]; then
+            echo "${{ secrets.CSC_LINK }}" | base64 --decode > /tmp/cert.p12
+            security create-keychain -p "" build.keychain
+            security import /tmp/cert.p12 -k build.keychain -P "${{ secrets.CSC_KEY_PASSWORD }}" -T /usr/bin/codesign
+            security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" build.keychain
+            security list-keychains -d user -s build.keychain login.keychain
+
+            codesign --deep --force --options runtime \
+              --entitlements build/entitlements.mac.plist \
+              --sign "Developer ID Application" \
+              "$APP"
+            codesign --verify --deep --strict --verbose=2 "$APP"
+          else
+            echo "Warning: No signing certificate — skipping code sign"
           fi
 
-          echo "path=$artifact_path" >> "$GITHUB_OUTPUT"
-          echo "name=$(basename "$artifact_path")" >> "$GITHUB_OUTPUT"
+      # Create DMG
+      - name: Create DMG
+        if: steps.tag_check.outputs.exists == 'false'
+        id: package
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          DMG_NAME="Legion-Interlink-${VERSION}-universal.dmg"
+          hdiutil create \
+            -volname "Legion Interlink" \
+            -srcfolder "dist/Legion Interlink.app" \
+            -ov -format UDZO \
+            "dist/${DMG_NAME}"
+          echo "dmg_name=${DMG_NAME}" >> "$GITHUB_OUTPUT"
+          echo "dmg_path=dist/${DMG_NAME}" >> "$GITHUB_OUTPUT"
 
+      # Notarize
+      - name: Notarize DMG
+        if: steps.tag_check.outputs.exists == 'false' && env.APPLE_ID != ''
+        env:
+          DMG_PATH: ${{ steps.package.outputs.dmg_path }}
+          DMG_NAME: ${{ steps.package.outputs.dmg_name }}
+        run: |
+          xcrun notarytool submit "$DMG_PATH" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+
+          xcrun stapler staple "dist/Legion Interlink.app"
+
+          # Re-create DMG with stapled app
+          rm "$DMG_PATH"
+          hdiutil create \
+            -volname "Legion Interlink" \
+            -srcfolder "dist/Legion Interlink.app" \
+            -ov -format UDZO \
+            "dist/${DMG_NAME}"
+
+      # Create GitHub release
       - name: Create tag and GitHub release
         if: steps.tag_check.outputs.exists == 'false'
         env:
           TAG: ${{ steps.version.outputs.tag }}
+          DMG_NAME: ${{ steps.package.outputs.dmg_name }}
         run: |
           git tag "$TAG"
           git push origin "$TAG"
-          gh release create "$TAG" "${{ steps.artifact.outputs.path }}" \
+          gh release create "$TAG" "dist/${DMG_NAME}" \
             --generate-notes \
             --title "$TAG" \
             --verify-tag
 
-  # ── Update Homebrew cask (main push, after release) ───────────────────────────
   update-cask:
     name: Update Cask
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -250,36 +253,35 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: Skip if no new release
-        if: needs.release.outputs.asset_name == ''
+        if: needs.release.outputs.dmg_name == ''
         run: echo "No new release — skipping cask update."
 
       - name: Download DMG and compute SHA256
-        if: needs.release.outputs.asset_name != ''
+        if: needs.release.outputs.dmg_name != ''
         id: sha
         env:
-          ASSET_NAME: ${{ needs.release.outputs.asset_name }}
+          DMG_NAME: ${{ needs.release.outputs.dmg_name }}
           TAG: ${{ needs.release.outputs.tag }}
         run: |
           gh release download "$TAG" \
-            --pattern "$ASSET_NAME" \
+            --pattern "$DMG_NAME" \
             --repo "${{ github.repository }}" \
             --output interlink.dmg
           sha=$(shasum -a 256 interlink.dmg | awk '{print $1}')
           echo "sha256=$sha" >> "$GITHUB_OUTPUT"
-          echo "asset_name_url=${ASSET_NAME// /%20}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v4
-        if: needs.release.outputs.asset_name != ''
+        if: needs.release.outputs.dmg_name != ''
         with:
           repository: LegionIO/homebrew-tap
           token: ${{ secrets.HOMEBREW_DISPATCH_TOKEN }}
           path: homebrew-tap
 
       - name: Update cask formula
-        if: needs.release.outputs.asset_name != ''
+        if: needs.release.outputs.dmg_name != ''
         working-directory: homebrew-tap
         env:
-          ASSET_NAME_URL: ${{ steps.sha.outputs.asset_name_url }}
+          DMG_NAME: ${{ needs.release.outputs.dmg_name }}
           REPOSITORY: ${{ github.repository }}
           SHA256: ${{ steps.sha.outputs.sha256 }}
           VERSION: ${{ needs.release.outputs.version }}
@@ -290,10 +292,16 @@ jobs:
             version "${VERSION}"
             sha256 "${SHA256}"
 
-            url "https://github.com/${REPOSITORY}/releases/download/v#{version}/${ASSET_NAME_URL}"
+            url "https://github.com/${REPOSITORY}/releases/download/v#{version}/${DMG_NAME}"
             name "Legion Interlink"
-            desc "LegionIO desktop client"
+            desc "LegionIO menu bar manager — bootstrap, monitor, and control the Legion stack"
             homepage "https://github.com/${REPOSITORY}"
+
+            depends_on formula: "legionio/tap/legionio"
+            depends_on formula: "redis"
+            depends_on formula: "memcached"
+            depends_on formula: "ollama"
+            depends_on macos: ">= :ventura"
 
             app "Legion Interlink.app"
 
@@ -302,7 +310,7 @@ jobs:
           RUBY
 
       - name: Commit and push cask update
-        if: needs.release.outputs.asset_name != ''
+        if: needs.release.outputs.dmg_name != ''
         working-directory: homebrew-tap
         env:
           VERSION: ${{ needs.release.outputs.version }}
