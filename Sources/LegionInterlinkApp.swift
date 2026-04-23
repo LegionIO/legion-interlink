@@ -36,6 +36,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
     private var statusObservation: NSKeyValueObservation?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Menu bar only — hide from Dock
+        NSApplication.shared.setActivationPolicy(.accessory)
+
         // Keep alive as menu bar app
         NSApplication.shared.disableRelaunchOnLogin()
         ProcessInfo.processInfo.disableSuddenTermination()
@@ -137,12 +140,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
         statusItem?.menu = nil
     }
 
-    @objc private func openWebAPI() {
-        if let url = URL(string: "http://localhost:\(ServiceManager.daemonPort)") {
-            NSWorkspace.shared.open(url)
-        }
-    }
-
     @objc private func toggleLaunchAtLogin(_ sender: NSMenuItem) {
         let service = SMAppService.mainApp
         do {
@@ -159,12 +156,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
     // MARK: - Window Management
 
     @MainActor @objc func showDashboard() {
-        // Temporarily become a regular app so we can accept key window / keyboard focus
-        NSApplication.shared.setActivationPolicy(.regular)
-        NSApplication.shared.activate(ignoringOtherApps: true)
-
         if let window = statusWindow, window.isVisible {
             window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
             return
         }
 
@@ -181,9 +175,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
         window.title = "Legion Interlink"
         window.contentView = hostingView
         window.center()
-        window.makeKeyAndOrderFront(nil)
         window.isReleasedWhenClosed = false
         window.delegate = self
+        // Allow the window to receive focus even in accessory mode
+        window.level = .floating
+        window.makeKeyAndOrderFront(nil)
+        window.level = .normal
+        NSApp.activate(ignoringOtherApps: true)
 
         statusWindow = window
     }
@@ -191,15 +189,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
     func windowWillClose(_ notification: Notification) {
         guard let closingWindow = notification.object as? NSWindow else { return }
         if closingWindow === statusWindow {
-            // Revert to accessory app (hide from Dock) when dashboard closes
-            NSApplication.shared.setActivationPolicy(.accessory)
+            statusWindow = nil
+        } else if closingWindow === onboardingWindow {
+            onboardingWindow = nil
         }
     }
 
     @MainActor func showOnboarding() {
         if let window = onboardingWindow, window.isVisible {
             window.makeKeyAndOrderFront(nil)
-            NSApplication.shared.activate(ignoringOtherApps: true)
+            NSApp.activate(ignoringOtherApps: true)
             return
         }
 
@@ -221,11 +220,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
         window.title = "Legion Interlink Setup"
         window.contentView = hostingView
         window.center()
-        window.makeKeyAndOrderFront(nil)
         window.isReleasedWhenClosed = false
+        // Allow focus in accessory mode
+        window.level = .floating
+        window.makeKeyAndOrderFront(nil)
+        window.level = .normal
+        NSApp.activate(ignoringOtherApps: true)
 
         onboardingWindow = window
-        NSApplication.shared.activate(ignoringOtherApps: true)
     }
 
     // MARK: - Menu Bar Icon
