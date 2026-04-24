@@ -2,7 +2,7 @@ import { existsSync, realpathSync } from 'fs';
 import { join, resolve } from 'path';
 import type { AppConfig } from '../config/schema.js';
 import { resolveDaemonUrl, resolveAuthToken } from '../lib/daemon-client.js';
-import type { LLMModelConfig } from './model-catalog.js';
+import type { LLMModelConfig, LLMProviderType } from './model-catalog.js';
 import type { StreamEvent } from './mastra-agent.js';
 import { withBrandUserAgent } from '../utils/user-agent.js';
 
@@ -145,6 +145,16 @@ function rubyPathCandidates(): string[] {
   ].filter(Boolean);
 }
 
+function mapProviderForDaemon(provider: LLMProviderType | string | undefined): string | undefined {
+  if (!provider) return undefined;
+  switch (provider) {
+    case 'amazon-bedrock': return 'bedrock';
+    case 'openai-compatible': return undefined;
+    case 'google': return 'gemini';
+    default: return provider;
+  }
+}
+
 function extractText(content: unknown): string {
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return '';
@@ -268,15 +278,23 @@ async function* streamDaemonApp(options: StreamAppOptions): AsyncGenerator<Strea
     return;
   }
 
-  // Let the daemon use its own model/provider defaults.
-  // Only forward model/provider if explicitly configured for daemon override.
+  // Resolve model and provider to send to the daemon.
+  // Priority: user-selected model from dropdown → daemon config override → daemon defaults.
   const daemonRuntime = options.config.runtime?.daemon as Record<string, unknown> | undefined;
   const daemonModelOverride = daemonRuntime?.model as string | undefined;
   const daemonProviderOverride = daemonRuntime?.provider as string | undefined;
+
+  const selectedModel = options.modelConfig.modelName || undefined;
+  const selectedProvider = options.modelConfig.provider || undefined;
+  const isPassthrough = !selectedModel || options.modelConfig.modelName === '';
+
+  const effectiveModel = isPassthrough ? daemonModelOverride : selectedModel;
+  const effectiveProvider = isPassthrough ? daemonProviderOverride : mapProviderForDaemon(selectedProvider);
+
   const requestBody: Record<string, unknown> = {
     messages: normalizedMessages,
-    ...(daemonModelOverride ? { model: daemonModelOverride } : {}),
-    ...(daemonProviderOverride ? { provider: daemonProviderOverride } : {}),
+    ...(effectiveModel ? { model: effectiveModel } : {}),
+    ...(effectiveProvider ? { provider: effectiveProvider } : {}),
     ...(options.tools?.length ? { tools: options.tools } : {}),
     ...(options.cwd ? { cwd: options.cwd } : {}),
     ...(options.conversationId ? { conversation_id: options.conversationId } : {}),

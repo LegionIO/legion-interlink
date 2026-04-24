@@ -201,19 +201,20 @@ export function registerAgentHandlers(ipcMain: IpcMain, appHome: string): void {
 
     if (!modelEntry || !streamConfig) {
       if (backend === 'legion-daemon') {
-        // Daemon manages its own models — create a passthrough config so the request proceeds
+        // Daemon manages its own models — create a passthrough config.
+        // Forward the user-selected model key so the daemon routes correctly.
         const fallbackModelConfig: LLMModelConfig = {
           provider: 'openai-compatible',
           endpoint: '',
           apiKey: '',
-          modelName: '',
+          modelName: modelKey ?? '',
           temperature: config.advanced.temperature,
           maxSteps: config.advanced.maxSteps,
           maxRetries: config.advanced.maxRetries,
         };
         const fallbackEntry: ModelCatalogEntry = {
-          key: '__daemon_default__',
-          displayName: 'Daemon Default',
+          key: modelKey ?? '__daemon_default__',
+          displayName: modelKey ?? 'Daemon Default',
           modelConfig: fallbackModelConfig,
         };
         modelEntry = fallbackEntry;

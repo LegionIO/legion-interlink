@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.7] - 2026-04-24
+
+### Fixed
+- Manual model selection from dropdown now forwards the chosen model to the daemon; previously only static `runtime.daemon.model` overrides were sent, so selecting a different model in the UI had no effect
+- Daemon-sourced models (from `/v1/models`) now pass their model key through the passthrough config instead of sending an empty string
+- Added `mapProviderForDaemon()` to translate Interlink provider types (`amazon-bedrock`, `google`, `openai-compatible`) to daemon-side names (`bedrock`, `gemini`, auto-detect)
+
 ## [1.1.6] - 2026-04-22
 
 ### Changed
