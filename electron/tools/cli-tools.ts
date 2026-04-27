@@ -1,26 +1,33 @@
 import { z } from 'zod';
 import { spawnSync } from 'node:child_process';
-import type { AppConfig } from '../config/schema.js';
+import type { AppConfig, CliToolConfig } from '../config/schema.js';
 import type { ToolDefinition } from './types.js';
 import { runCommandWithStreaming, resolveProcessStreamingConfig } from './process-runner.js';
 import { runToolExecution } from './execution.js';
 import { isCommandAllowed } from './shell.js';
 
-function binaryExists(name: string): boolean {
+export type CliToolSpec = {
+  name: string;
+  binary: string;
+  extraBinaries?: string[];
+  description: string;
+  prefix?: string;
+  enabled?: boolean;
+  builtIn?: boolean;
+};
+
+export type CliToolStatus = CliToolSpec & {
+  available: boolean;
+  binaries: Array<{ name: string; available: boolean }>;
+};
+
+export function binaryExists(name: string): boolean {
   const isWindows = process.platform === 'win32';
   const result = isWindows
     ? spawnSync('where', [name], { stdio: 'ignore', shell: false })
     : spawnSync('command', ['-v', name], { stdio: 'ignore', shell: true });
   return result.status === 0;
 }
-
-type CliToolSpec = {
-  name: string;
-  binary: string;
-  extraBinaries?: string[];
-  description: string;
-  prefix?: string;
-};
 
 function createCliTool(spec: CliToolSpec, getConfig: () => AppConfig): ToolDefinition {
   return {
@@ -81,7 +88,7 @@ function createCliTool(spec: CliToolSpec, getConfig: () => AppConfig): ToolDefin
   };
 }
 
-const CLI_TOOL_SPECS: CliToolSpec[] = [
+export const BUILT_IN_CLI_TOOL_SPECS: CliToolSpec[] = [
   {
     name: 'github',
     binary: 'gh',
@@ -162,13 +169,71 @@ const CLI_TOOL_SPECS: CliToolSpec[] = [
       'Examples: jfrog rt ping, jfrog rt search <pattern>, jfrog rt upload <file> <repo>, jfrog config show.',
     ].join('\n'),
   },
-];
+].map((spec) => ({ ...spec, builtIn: true }));
+
+function normalizeToolConfig(tool: CliToolConfig): CliToolSpec | null {
+  const name = tool.name.trim();
+  const binary = tool.binary.trim();
+  if (!name || !binary) return null;
+
+  return {
+    name,
+    binary,
+    extraBinaries: tool.extraBinaries?.map((value) => value.trim()).filter(Boolean),
+    description: tool.description?.trim() || `Run ${binary} CLI commands.`,
+    prefix: tool.prefix?.trim() || binary,
+    enabled: tool.enabled,
+  };
+}
+
+export function getCliToolSpecs(config: AppConfig): CliToolSpec[] {
+  const overrides = new Map<string, CliToolSpec>();
+  const custom: CliToolSpec[] = [];
+
+  for (const entry of config.cliTools ?? []) {
+    const spec = normalizeToolConfig(entry);
+    if (!spec) continue;
+
+    const builtIn = BUILT_IN_CLI_TOOL_SPECS.find((candidate) => candidate.name === spec.name);
+    if (builtIn) {
+      overrides.set(spec.name, spec);
+    } else {
+      custom.push({ ...spec, builtIn: false });
+    }
+  }
+
+  const builtIns = BUILT_IN_CLI_TOOL_SPECS.map((spec) => {
+    const override = overrides.get(spec.name);
+    if (!override) return spec;
+    return {
+      ...spec,
+      enabled: override.enabled,
+    };
+  });
+
+  return [...builtIns, ...custom];
+}
+
+export function listCliToolStatus(config: AppConfig): CliToolStatus[] {
+  return getCliToolSpecs(config).map((spec) => {
+    const binaries = [spec.binary, ...(spec.extraBinaries ?? [])]
+      .filter((value, index, array) => value && array.indexOf(value) === index)
+      .map((name) => ({ name, available: binaryExists(name) }));
+
+    return {
+      ...spec,
+      available: binaries.some((binary) => binary.name === spec.binary && binary.available),
+      binaries,
+    };
+  });
+}
 
 export function buildCliTools(getConfig: () => AppConfig): ToolDefinition[] {
   const tools: ToolDefinition[] = [];
+  const config = getConfig();
 
-  for (const spec of CLI_TOOL_SPECS) {
-    if (binaryExists(spec.binary)) {
+  for (const spec of getCliToolSpecs(config)) {
+    if (spec.enabled !== false && binaryExists(spec.binary)) {
       tools.push(createCliTool(spec, getConfig));
     }
   }

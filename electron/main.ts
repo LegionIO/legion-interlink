@@ -22,6 +22,7 @@ import type { AppConfig } from './config/schema.js';
 import { registerComputerUseHandlers } from './ipc/computer-use.js';
 import { registerKnowledgeHandlers } from './ipc/knowledge.js';
 import { registerClipboardHandlers } from './ipc/clipboard.js';
+import { registerCliToolsHandlers } from './ipc/cli-tools.js';
 import { closeAllOverlayWindows } from './computer-use/overlay-window.js';
 import { registerTriggerDispatchHandlers, handleSseEvent } from './ipc/trigger-dispatch.js';
 import { registerGaiaThreadHandlers } from './ipc/gaia-thread.js';
@@ -362,6 +363,10 @@ if (gotSingleInstanceLock) {
     let lastMcpFingerprint = JSON.stringify(getConfig().mcpServers ?? []);
     let lastSkillsFingerprint = JSON.stringify(getConfig().skills?.enabled ?? []);
     let lastDisplayFingerprint = JSON.stringify(getConfig().computerUse?.localMacos?.allowedDisplays ?? []);
+    let lastCliToolsFingerprint = JSON.stringify({
+      cliTools: getConfig().cliTools ?? [],
+      shell: getConfig().tools?.shell ?? {},
+    });
     const syncRealtimeTools = (): void => {
       updateActiveRealtimeSessionTools(getRegisteredTools());
     };
@@ -390,6 +395,22 @@ if (gotSingleInstanceLock) {
         updateSkillTools(skillTools);
         syncRealtimeTools();
         console.info(`[${__BRAND_PRODUCT_NAME}] Skills hot-reload complete: ${skillTools.length} skill tools`);
+      }
+
+      const newCliToolsFp = JSON.stringify({
+        cliTools: config.cliTools ?? [],
+        shell: config.tools?.shell ?? {},
+      });
+      if (newCliToolsFp !== lastCliToolsFingerprint) {
+        lastCliToolsFingerprint = newCliToolsFp;
+        buildToolRegistry(getConfig, APP_HOME).then((tools) => {
+          const pluginTools = pluginManager.getAllPluginTools();
+          registerTools([...tools, ...pluginTools]);
+          syncRealtimeTools();
+          console.info(`[${__BRAND_PRODUCT_NAME}] CLI tool settings changed, rebuilt ${tools.length} base tools`);
+        }).catch((err) => {
+          console.error(`[${__BRAND_PRODUCT_NAME}] CLI tool hot-reload failed:`, err);
+        });
       }
 
       // Display list change detection — auto-update maxDimension when allowed displays change
@@ -448,6 +469,7 @@ if (gotSingleInstanceLock) {
     registerComputerUseHandlers(ipcMain, APP_HOME, getConfig);
     registerKnowledgeHandlers(ipcMain, APP_HOME, getConfig);
     registerClipboardHandlers(ipcMain);
+    registerCliToolsHandlers(ipcMain, getConfig);
 
     // Auto-seed computer use display settings on startup.
     // If allowedDisplays is empty, populate it with all discovered displays

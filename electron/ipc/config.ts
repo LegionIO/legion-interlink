@@ -109,6 +109,14 @@ function getDefaultConfig() {
       },
     },
     mcpServers: [] as Array<{ name: string; command?: string; args?: string[]; url?: string; env?: Record<string, string> }>,
+    cliTools: [] as Array<{
+      name: string;
+      binary: string;
+      extraBinaries?: string[];
+      description?: string;
+      prefix?: string;
+      enabled?: boolean;
+    }>,
     skills: {
       directory: '~/.' + __BRAND_APP_SLUG + '/skills',
       enabled: [] as string[],
@@ -642,6 +650,7 @@ export function desktopConfigPayload(config: AppConfig): Record<string, unknown>
     compaction: config.compaction,
     tools: config.tools,
     mcpServers: config.mcpServers,
+    cliTools: config.cliTools,
     skills: config.skills,
     systemPrompt: config.systemPrompt,
     plugins: config.plugins,

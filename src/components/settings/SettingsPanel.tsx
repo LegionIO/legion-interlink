@@ -4,6 +4,7 @@ import { useConfig } from '@/providers/ConfigProvider';
 import { EditableTextarea } from '@/components/EditableTextarea';
 import { EditableInput } from '@/components/EditableInput';
 import { ToolSettings } from './ToolSettings';
+import { CliToolsSettings } from './CliToolsSettings';
 import { McpSettings } from './McpSettings';
 import { SkillSettings } from './SkillSettings';
 import { AudioSettings } from './AudioSettings';
@@ -43,7 +44,7 @@ type SettingsSection =
   | 'prompts' | 'triggers' | 'webhooks' | 'tenants' | 'capacity' | 'governance'
   | 'metrics' | 'doctor' | 'topology' | 'memory-inspector' | 'task-graph'
   | 'cost-tracker' | 'mesh' | 'schedule-builder' | 'audit'
-  | 'skills' | 'system-prompt' | 'tools' | 'mcp'
+  | 'skills' | 'system-prompt' | 'tools' | 'cli-tools' | 'mcp'
   | 'audio' | 'realtime' | 'media-generation' | 'computer-use';
 
 const sections: Array<{ key: SettingsSection; label: string }> = [
@@ -72,6 +73,7 @@ const sections: Array<{ key: SettingsSection; label: string }> = [
   { key: 'skills', label: 'Skills' },
   { key: 'system-prompt', label: 'System Prompt' },
   { key: 'tools', label: 'Tools' },
+  { key: 'cli-tools', label: 'CLI Tools' },
   { key: 'mcp', label: 'MCP Servers' },
   { key: 'audio', label: 'Audio' },
   { key: 'realtime', label: 'Realtime Audio' },
@@ -147,6 +149,7 @@ export const SettingsPanel: FC<{ onClose: () => void }> = ({ onClose }) => {
       <div className="flex-1 overflow-y-auto p-5">
         {activeSection === 'appearance' && <AppearanceSettings config={config} updateConfig={updateConfig} />}
         {activeSection === 'tools' && <ToolSettings config={config} updateConfig={updateConfig} />}
+        {activeSection === 'cli-tools' && <CliToolsSettings config={config} updateConfig={updateConfig} />}
         {activeSection === 'skills' && <SkillSettings config={config} updateConfig={updateConfig} />}
         {activeSection === 'system-prompt' && <SystemPromptSettings config={config} updateConfig={updateConfig} />}
         {activeSection === 'mcp' && <McpSettings config={config} updateConfig={updateConfig} />}
@@ -237,4 +240,3 @@ const SystemPromptSettings: FC<SettingsProps> = ({ config, updateConfig }) => {
     </div>
   );
 };
-

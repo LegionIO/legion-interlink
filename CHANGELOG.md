@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.17] - 2026-04-27
+
+### Added
+- Settings now includes a CLI Tools manager that shows built-in tools, checks binary availability, allows custom CLI tools, and enables or disables CLI tools without deleting built-in definitions (#37)
+
 ## [1.1.16] - 2026-04-27
 
 ### Fixed

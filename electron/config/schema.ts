@@ -151,6 +151,15 @@ const mcpServerSchema = z.object({
   enabled: z.boolean().optional(),
 });
 
+const cliToolSchema = z.object({
+  name: z.string(),
+  binary: z.string(),
+  extraBinaries: z.array(z.string()).optional(),
+  description: z.string().optional(),
+  prefix: z.string().optional(),
+  enabled: z.boolean().optional(),
+});
+
 const subAgentConfigSchema = z.object({
   enabled: z.boolean(),
   maxDepth: z.number().positive().max(10),
@@ -479,6 +488,7 @@ export const appConfigSchema = z.object({
     }).optional(),
   }),
   mcpServers: z.array(mcpServerSchema),
+  cliTools: z.array(cliToolSchema).optional(),
   skills: z.object({
     directory: z.string(),
     enabled: z.array(z.string()),
@@ -517,6 +527,7 @@ export const appConfigSchema = z.object({
 });
 
 export type AppConfig = z.infer<typeof appConfigSchema>;
+export type CliToolConfig = z.infer<typeof cliToolSchema>;
 export type DaemonLlmConfig = z.infer<typeof daemonLlmConfigSchema>;
 export type ContextCurationConfig = z.infer<typeof contextCurationConfigSchema>;
 export type DebateConfig = z.infer<typeof debateConfigSchema>;
