@@ -20,10 +20,17 @@ interface GaiaStatus {
   phases?: PhaseState[];
   sensory_buffer?: { depth?: number; recent_signals?: number; max_capacity?: number };
   channels?: Array<{ name: string; type?: string; connected?: boolean }>;
-  sessions?: { active_count?: number; ttl?: number; identities?: string[] };
+  sessions?: number | SessionDetail;
+  sessions_detail?: SessionDetail;
   notification_gate?: { schedule?: boolean; presence?: string; behavioral?: number };
   dream_cycle?: { active?: boolean; last_run?: string; phase_progress?: string; insight_count?: number };
   uptime_seconds?: number;
+}
+
+interface SessionDetail {
+  active_count?: number;
+  ttl?: number;
+  identities?: string[];
 }
 
 interface TickEvent {
@@ -46,6 +53,11 @@ function formatSecondsAgo(date: Date): string {
   const mins = Math.floor(secs / 60);
   if (mins < 60) return `${mins}m ago`;
   return `${Math.floor(mins / 60)}h ago`;
+}
+
+function sessionDetailFrom(status: GaiaStatus | null): SessionDetail | undefined {
+  if (status?.sessions_detail) return status.sessions_detail;
+  return typeof status?.sessions === 'object' ? status.sessions : undefined;
 }
 
 export const DaemonGaia: FC<SettingsProps> = () => {
@@ -110,7 +122,7 @@ export const DaemonGaia: FC<SettingsProps> = () => {
   const buf = status?.sensory_buffer;
   const gate = status?.notification_gate;
   const dream = status?.dream_cycle;
-  const sessions = status?.sessions;
+  const sessions = sessionDetailFrom(status);
 
   return (
     <div className="space-y-6">

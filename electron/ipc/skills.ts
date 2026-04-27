@@ -12,6 +12,14 @@ import {
   withTimeout,
 } from '../lib/daemon-client.js';
 
+function unwrapSkillList(body: unknown): unknown[] {
+  if (Array.isArray(body)) return body;
+  if (body && typeof body === 'object' && Array.isArray((body as { data?: unknown }).data)) {
+    return (body as { data: unknown[] }).data;
+  }
+  return [];
+}
+
 export function registerSkillsHandlers(
   ipcMain: IpcMain,
   appHome: string,
@@ -30,7 +38,7 @@ export function registerSkillsHandlers(
         `skills:list failed: ${res.status}${responseText ? ` - ${responseText}` : ''}`,
       );
     }
-    return res.json();
+    return unwrapSkillList(await res.json());
   });
 
   ipcMain.handle('skills:get', async (_event, name: string) => {

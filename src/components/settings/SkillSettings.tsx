@@ -28,6 +28,16 @@ type SkillDetail = {
   error?: string;
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object';
+}
+
+function normalizeSkillList(value: unknown): SkillEntry[] {
+  if (Array.isArray(value)) return value as SkillEntry[];
+  if (isRecord(value) && Array.isArray(value.data)) return value.data as SkillEntry[];
+  return [];
+}
+
 const typeIcons: Record<string, FC<{ className?: string }>> = {
   shell: TerminalIcon,
   script: CodeIcon,
@@ -52,8 +62,8 @@ export const SkillSettings: FC<SettingsProps> = ({ config, updateConfig: _update
 
   const loadSkills = async () => {
     try {
-      const list = await app.skills.list();
-      setSkills(list);
+      const list = (await app.skills.list()) as unknown;
+      setSkills(normalizeSkillList(list));
     } catch {
       setSkills([]);
     } finally {

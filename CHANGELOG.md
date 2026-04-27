@@ -1,5 +1,40 @@
 # Changelog
 
+## [1.1.14] - 2026-04-27
+
+### Fixed
+- Mission Control worker health now reads daemon `lifecycle_state` before falling back to `status`, and counts paused workers as degraded instead of healthy (#54)
+
+## [1.1.13] - 2026-04-27
+
+### Fixed
+- Daemon settings GAIA card now derives mode from enabled/connected state and reads session TTL from `gaia.session.ttl` before the legacy flat fallback (#55)
+
+## [1.1.12] - 2026-04-27
+
+### Fixed
+- Chat responses now show a visible streaming/done/interrupted/error status pill and stale streams are recovered after 60 seconds without progress instead of leaving conversations marked running forever (#56)
+
+## [1.1.11] - 2026-04-27
+
+### Fixed
+- Mesh settings tab now checks loaded extensions and daemon mesh flags so it can distinguish missing `lex-mesh`, solo-node operation, and real disconnected states (#57)
+
+## [1.1.10] - 2026-04-27
+
+### Fixed
+- Skills settings tab now unwraps daemon `{ data, meta }` envelopes and guards against non-array skill responses so the panel no longer crashes on load (#58)
+
+## [1.1.9] - 2026-04-27
+
+### Fixed
+- Events settings tab now renders daemon event names from either `type` or `event` and builds useful detail text from flat event metadata when no nested `data` payload is present (#61)
+
+## [1.1.8] - 2026-04-27
+
+### Fixed
+- GAIA settings sessions card now reads `sessions_detail` before falling back to the legacy object-shaped `sessions`, so daemon responses with numeric `sessions` no longer render an empty value (#60)
+
 ## [1.1.7] - 2026-04-24
 
 ### Fixed

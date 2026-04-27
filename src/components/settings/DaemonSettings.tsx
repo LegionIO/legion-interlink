@@ -555,7 +555,10 @@ const LlmRoutingSection: FC<{ settings: DaemonSettingsData }> = ({ settings }) =
 
 const GaiaSection: FC<{ settings: DaemonSettingsData }> = ({ settings }) => {
   const gaia = (settings.gaia ?? {}) as Record<string, unknown>;
-  const mode = asString(gaia.mode, 'not configured');
+  const explicitMode = asString(gaia.mode);
+  const enabled = asBool(gaia.enabled);
+  const connected = gaia.connected;
+  const mode = explicitMode || (enabled ? (connected === false ? 'enabled (disconnected)' : 'enabled') : 'disabled');
   const channels = (gaia.channels ?? {}) as Record<string, unknown>;
   const channelNames = Object.entries(channels)
     .filter(([, cfg]) => {
@@ -564,9 +567,9 @@ const GaiaSection: FC<{ settings: DaemonSettingsData }> = ({ settings }) => {
     })
     .map(([name]) => name);
 
-  const sessionTtl = asNumber(gaia.session_ttl, 86400);
+  const sessionTtl = asNumber(dig(gaia, 'session', 'ttl'), asNumber(gaia.session_ttl, 86400));
 
-  if (mode === 'not configured' && channelNames.length === 0) return null;
+  if (Object.keys(gaia).length === 0 && channelNames.length === 0) return null;
 
   return (
     <fieldset className="rounded-lg border p-3 space-y-3">
