@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.14] - 2026-04-27
+
+### Fixed
+- Mission Control worker health now reads daemon `lifecycle_state` before falling back to `status`, and counts paused workers as degraded instead of healthy (#54)
+
 ## [1.1.13] - 2026-04-27
 
 ### Fixed

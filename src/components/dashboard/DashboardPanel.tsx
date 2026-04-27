@@ -90,6 +90,11 @@ function fmtAgo(iso: string): string {
   return `${Math.floor(ms / 86400_000)}d`;
 }
 
+function workerState(worker: Record<string, unknown>): string {
+  const state = worker.lifecycle_state ?? worker.status;
+  return typeof state === 'string' ? state : '';
+}
+
 export const DashboardPanel: FC<{ onClose: () => void }> = () => {
   const { notifications } = useNotifications();
   const [loading, setLoading] = useState(true);
@@ -140,8 +145,8 @@ export const DashboardPanel: FC<{ onClose: () => void }> = () => {
         const arr = Array.isArray(wRes.data) ? wRes.data as Record<string, unknown>[] : [];
         setWorkers({
           total: arr.length,
-          healthy: arr.filter((w) => w.status === 'healthy' || w.status === 'active' || w.status === 'running').length,
-          degraded: arr.filter((w) => w.status === 'degraded' || w.status === 'unhealthy').length,
+          healthy: arr.filter((w) => ['healthy', 'active', 'running'].includes(workerState(w))).length,
+          degraded: arr.filter((w) => ['degraded', 'unhealthy', 'paused'].includes(workerState(w))).length,
         });
       }
 
