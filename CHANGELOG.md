@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.8] - 2026-04-27
+
+### Fixed
+- GAIA settings sessions card now reads `sessions_detail` before falling back to the legacy object-shaped `sessions`, so daemon responses with numeric `sessions` no longer render an empty value (#60)
+
 ## [1.1.7] - 2026-04-24
 
 ### Fixed
