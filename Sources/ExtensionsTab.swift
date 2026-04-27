@@ -133,10 +133,6 @@ struct ExtensionsTab: View {
                             Text("v\(ext.version)")
                                 .font(.system(size: 9, design: .monospaced))
                                 .foregroundColor(TerminalTheme.accent.opacity(0.7))
-
-                            Text(ext.displayState)
-                                .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                                .foregroundColor(color)
                         }
                     }
 
@@ -196,6 +192,9 @@ struct ExtensionsTab: View {
             Text("No extensions found")
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundColor(TerminalTheme.textDim)
+            Text("Extensions will appear when the daemon is running")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(TerminalTheme.textDim.opacity(0.4))
             Spacer()
         }
         .frame(maxWidth: .infinity)

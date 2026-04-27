@@ -166,11 +166,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 700, height: 550),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
         window.title = "Legion Interlink"
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
         window.contentView = hostingView
         window.center()
         window.isReleasedWhenClosed = false

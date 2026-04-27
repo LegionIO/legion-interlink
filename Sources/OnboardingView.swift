@@ -36,6 +36,45 @@ private struct SpinnerView: View {
     }
 }
 
+// MARK: - Hover CTA Button
+
+private struct HoverCTAButton: View {
+    let label: String
+    let color: Color
+    let isDisabled: Bool
+    let action: () -> Void
+    @State private var isHovered = false
+
+    init(label: String, color: Color, isDisabled: Bool = false, action: @escaping () -> Void) {
+        self.label = label
+        self.color = color
+        self.isDisabled = isDisabled
+        self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            Text(label)
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .foregroundColor(isDisabled ? TerminalTheme.textDim : TerminalTheme.bg)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 7)
+                .background(isDisabled ? TerminalTheme.cardBg : (isHovered ? color.opacity(0.85) : color))
+                .cornerRadius(5)
+                .shadow(color: isDisabled ? Color.clear : color.opacity(isHovered ? 0.5 : 0.3), radius: isHovered ? 12 : 8, y: 2)
+                .scaleEffect(isHovered && !isDisabled ? 1.02 : 1.0)
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+        .pointerCursor()
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.15)) {
+                isHovered = hovering
+            }
+        }
+    }
+}
+
 // MARK: - OnboardingView
 
 struct OnboardingView: View {
@@ -154,6 +193,11 @@ struct OnboardingView: View {
                     RoundedRectangle(cornerRadius: 2)
                         .fill(TerminalTheme.cardBg)
                         .frame(height: 4)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 2)
+                                .stroke(TerminalTheme.border, lineWidth: 1)
+                        )
+                        .shadow(color: Color.black.opacity(0.2), radius: 1, y: 1)
 
                     RoundedRectangle(cornerRadius: 2)
                         .fill(
@@ -307,13 +351,13 @@ struct OnboardingView: View {
                 : Color.clear
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 5)
+            RoundedRectangle(cornerRadius: 6)
                 .stroke(
                     isActive ? TerminalTheme.accent.opacity(0.15) : Color.clear,
                     lineWidth: 1
                 )
         )
-        .cornerRadius(5)
+        .cornerRadius(6)
         .animation(.easeInOut(duration: 0.25), value: step.status)
     }
 
@@ -427,36 +471,19 @@ struct OnboardingView: View {
             Spacer()
 
             if isDone {
-                Button(action: {
+                HoverCTAButton(label: "launch", color: TerminalTheme.green) {
                     manager.checkSetupNeeded()
                     Task { await manager.checkAllServices() }
                     onComplete()
-                }) {
-                    Text("launch")
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
-                        .foregroundColor(TerminalTheme.bg)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 7)
-                        .background(TerminalTheme.green)
-                        .cornerRadius(5)
-                        .shadow(color: TerminalTheme.green.opacity(0.3), radius: 8, y: 2)
                 }
-                .buttonStyle(.plain)
-                .pointerCursor()
             } else {
-                Button(action: { Task { await runSetup() } }) {
-                    Text(isRunning ? "setting up..." : "begin setup")
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
-                        .foregroundColor(isRunning ? TerminalTheme.textDim : TerminalTheme.bg)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 7)
-                        .background(isRunning ? TerminalTheme.cardBg : TerminalTheme.accent)
-                        .cornerRadius(5)
-                        .shadow(color: isRunning ? Color.clear : TerminalTheme.accent.opacity(0.3), radius: 8, y: 2)
+                HoverCTAButton(
+                    label: isRunning ? "setting up..." : "begin setup",
+                    color: TerminalTheme.accent,
+                    isDisabled: isRunning
+                ) {
+                    Task { await runSetup() }
                 }
-                .buttonStyle(.plain)
-                .disabled(isRunning)
-                .pointerCursor()
             }
         }
         .padding(.horizontal, 16)

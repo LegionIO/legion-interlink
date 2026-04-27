@@ -127,10 +127,6 @@ struct WorkersTab: View {
                             .foregroundColor(TerminalTheme.textDim)
                             .lineLimit(1)
 
-                        Text(worker.state)
-                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                            .foregroundColor(stateColor(worker.state))
-
                         if worker.taskCount > 0 {
                             Text("\(worker.taskCount) tasks")
                                 .font(.system(size: 9, design: .monospaced))
@@ -177,6 +173,9 @@ struct WorkersTab: View {
             Text("No workers found")
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundColor(TerminalTheme.textDim)
+            Text("Workers will appear when tasks are active")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(TerminalTheme.textDim.opacity(0.4))
             Spacer()
         }
         .frame(maxWidth: .infinity)

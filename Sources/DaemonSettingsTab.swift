@@ -287,7 +287,7 @@ struct DaemonSettingsTab: View {
             Text(displayLabel)
                 .font(.system(size: 9, weight: .medium, design: .monospaced))
                 .foregroundColor(TerminalTheme.accent.opacity(0.85))
-                .frame(width: 160, alignment: .trailing)
+                .frame(minWidth: 100, maxWidth: 180, alignment: .trailing)
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .padding(.trailing, 12)

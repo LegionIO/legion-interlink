@@ -105,9 +105,9 @@ struct TerminalSearchBox: View {
         .padding(.vertical, 2)
         .background(TerminalTheme.cardBg)
         .overlay(
-            RoundedRectangle(cornerRadius: 4)
+            RoundedRectangle(cornerRadius: 5)
                 .stroke(TerminalTheme.border, lineWidth: 1)
         )
-        .cornerRadius(4)
+        .cornerRadius(5)
     }
 }

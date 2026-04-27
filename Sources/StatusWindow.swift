@@ -83,7 +83,9 @@ private struct BreathingStatusPill: View {
             if isOnline { breathe = true }
         }
         .onChange(of: isOnline) { online in
-            breathe = online
+            withAnimation(.easeInOut(duration: 0.3)) {
+                breathe = online
+            }
         }
     }
 }
@@ -133,6 +135,46 @@ private struct PulsingStatusText: View {
                     }
                 }
             }
+    }
+}
+
+// MARK: - Pulsing Status Dot
+
+private struct PulsingDot: View {
+    let color: Color
+    let isTransitioning: Bool
+    @State private var pulse = false
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(color.opacity(0.2))
+                .frame(width: 20, height: 20)
+            Circle()
+                .fill(color)
+                .frame(width: 8, height: 8)
+                .shadow(color: color.opacity(pulse ? 0.9 : 0.5), radius: pulse ? 8 : 4)
+        }
+        .opacity(isTransitioning && pulse ? 0.5 : 1.0)
+        .onAppear {
+            if isTransitioning {
+                withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
+                    pulse = true
+                }
+            }
+        }
+        .onChange(of: isTransitioning) { transitioning in
+            if transitioning {
+                pulse = false
+                withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
+                    pulse = true
+                }
+            } else {
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    pulse = false
+                }
+            }
+        }
     }
 }
 
@@ -309,6 +351,7 @@ struct StatusWindowView: View {
                 tabButton(title: "Workers", icon: "gearshape.2", index: Self.tabWorkers)
                 tabButton(title: "Settings", icon: "gearshape", index: Self.tabSettings)
             }
+            .padding(.horizontal, 8)
         }
         .background(TerminalTheme.bg)
         .overlay(
@@ -546,15 +589,8 @@ struct ServicesTab: View {
 
     private func statusDot(_ status: ServiceStatus) -> some View {
         let color = statusColor(status)
-        return ZStack {
-            Circle()
-                .fill(color.opacity(0.2))
-                .frame(width: 20, height: 20)
-            Circle()
-                .fill(color)
-                .frame(width: 8, height: 8)
-                .shadow(color: color.opacity(0.5), radius: 4)
-        }
+        let isTransitioning = status == .starting || status == .stopping
+        return PulsingDot(color: color, isTransitioning: isTransitioning)
     }
 
     private func statusColor(_ status: ServiceStatus) -> Color {
@@ -616,11 +652,11 @@ struct TerminalCheckboxStyle: ToggleStyle {
     func makeBody(configuration: Configuration) -> some View {
         HStack(spacing: 5) {
             ZStack {
-                RoundedRectangle(cornerRadius: 3.5)
+                RoundedRectangle(cornerRadius: 4)
                     .fill(configuration.isOn ? TerminalTheme.accent : TerminalTheme.cardBg)
                     .frame(width: 14, height: 14)
 
-                RoundedRectangle(cornerRadius: 3.5)
+                RoundedRectangle(cornerRadius: 4)
                     .stroke(
                         configuration.isOn ? TerminalTheme.accent : TerminalTheme.textDim.opacity(0.3),
                         lineWidth: 1
@@ -640,6 +676,40 @@ struct TerminalCheckboxStyle: ToggleStyle {
         }
         .onTapGesture {
             configuration.isOn.toggle()
+        }
+    }
+}
+
+// MARK: - Clear Logs Button (with hover)
+
+private struct ClearLogsButton: View {
+    let action: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: "xmark.circle")
+                    .font(.system(size: 10))
+                Text("clear logs")
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+            }
+            .foregroundColor(isHovered ? TerminalTheme.text : TerminalTheme.textDim)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(isHovered ? TerminalTheme.textDim.opacity(0.2) : TerminalTheme.textDim.opacity(0.1))
+            .overlay(
+                RoundedRectangle(cornerRadius: 3)
+                    .stroke(isHovered ? TerminalTheme.textDim.opacity(0.4) : TerminalTheme.textDim.opacity(0.2), lineWidth: 1)
+            )
+            .cornerRadius(3)
+        }
+        .buttonStyle(.plain)
+        .pointerCursor()
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) {
+                isHovered = hovering
+            }
         }
     }
 }
@@ -675,25 +745,7 @@ struct LogsTab: View {
                 }
                 .toggleStyle(TerminalCheckboxStyle())
 
-                Button(action: { manager.clearLogs() }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "xmark.circle")
-                            .font(.system(size: 10))
-                        Text("clear logs")
-                            .font(.system(size: 9, weight: .medium, design: .monospaced))
-                    }
-                    .foregroundColor(TerminalTheme.textDim)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(TerminalTheme.textDim.opacity(0.1))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 3)
-                            .stroke(TerminalTheme.textDim.opacity(0.2), lineWidth: 1)
-                    )
-                    .cornerRadius(3)
-                }
-                .buttonStyle(.plain)
-                .pointerCursor()
+                ClearLogsButton(action: { manager.clearLogs() })
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
@@ -709,12 +761,12 @@ struct LogsTab: View {
             // Log content
             ScrollViewReader { proxy in
                 ScrollView(.vertical) {
-                    Text(manager.logContents.isEmpty ? "waiting for log output..." : manager.logContents)
+                    Text(manager.logContents.isEmpty ? "$ waiting for log output..." : manager.logContents)
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundColor(
                             manager.logContents.isEmpty
                                 ? TerminalTheme.textDim
-                                : TerminalTheme.green.opacity(0.85)
+                                : Color(red: 0.35, green: 0.88, blue: 0.48).opacity(0.85)
                         )
                         .lineLimit(nil)
                         .fixedSize(horizontal: false, vertical: true)
