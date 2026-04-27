@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.10] - 2026-04-27
+
+### Fixed
+- Skills settings tab now unwraps daemon `{ data, meta }` envelopes and guards against non-array skill responses so the panel no longer crashes on load (#58)
+
 ## [1.1.9] - 2026-04-27
 
 ### Fixed
