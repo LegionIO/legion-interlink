@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.13] - 2026-04-27
+
+### Fixed
+- Daemon settings GAIA card now derives mode from enabled/connected state and reads session TTL from `gaia.session.ttl` before the legacy flat fallback (#55)
+
 ## [1.1.12] - 2026-04-27
 
 ### Fixed
