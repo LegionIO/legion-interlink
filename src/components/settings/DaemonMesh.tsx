@@ -16,14 +16,27 @@ interface MeshPeer {
 }
 
 interface MeshStatus {
-  node_id: string;
+  node_id?: string;
   cluster_name?: string;
   role?: string;
-  peer_count: number;
-  connected: boolean;
+  peer_count?: number;
+  total?: number;
+  online?: number;
+  connected?: boolean;
+  extension_loaded?: boolean;
+  broker_connected?: boolean;
   uptime_seconds?: number;
   gossip_interval_ms?: number;
 }
+
+interface ExtensionInfo {
+  id?: string;
+  name?: string;
+  namespace?: string;
+  state?: string;
+}
+
+type MeshState = 'not-installed' | 'connected' | 'solo' | 'disconnected';
 
 const STATUS_COLORS: Record<string, string> = {
   healthy: 'text-emerald-400',
@@ -46,6 +59,59 @@ function fmtAgo(iso: string): string {
   if (ms < 60_000) return `${Math.floor(ms / 1000)}s ago`;
   if (ms < 3600_000) return `${Math.floor(ms / 60_000)}m ago`;
   return `${Math.floor(ms / 3600_000)}h ago`;
+}
+
+function normalizeList<T>(value: unknown, key: string): T[] {
+  if (Array.isArray(value)) return value as T[];
+  if (value && typeof value === 'object' && Array.isArray((value as Record<string, unknown>)[key])) {
+    return (value as Record<string, unknown>)[key] as T[];
+  }
+  return [];
+}
+
+function extensionKey(extension: ExtensionInfo): string {
+  return [
+    extension.id,
+    extension.name,
+    extension.namespace ? `${extension.namespace}-${extension.name || ''}` : undefined,
+    extension.namespace ? `${extension.namespace}:${extension.name || ''}` : undefined,
+  ].filter(Boolean).join('|').toLowerCase();
+}
+
+function isMeshExtensionLoaded(extensions: ExtensionInfo[]): boolean {
+  return extensions.some((extension) => {
+    const key = extensionKey(extension);
+    return key.includes('lex-mesh') || key.includes('lex:mesh') || key === 'mesh';
+  });
+}
+
+function peerCount(status: MeshStatus | null, peers: MeshPeer[]): number {
+  return status?.peer_count ?? status?.total ?? peers.length;
+}
+
+function reachableCount(status: MeshStatus | null, peers: MeshPeer[]): number {
+  return status?.online ?? peers.filter((p) => p.status !== 'unreachable' && p.status !== 'disconnected').length;
+}
+
+function meshState(status: MeshStatus | null, peers: MeshPeer[], extensionLoaded: boolean | null, error: string | null): MeshState {
+  if (extensionLoaded === false || status?.extension_loaded === false) return 'not-installed';
+  if (error || status?.broker_connected === false) return 'disconnected';
+  if (status?.connected === false && peerCount(status, peers) > 0) return 'disconnected';
+  if (peerCount(status, peers) === 0) return 'solo';
+  return 'connected';
+}
+
+function meshStateLabel(state: MeshState): string {
+  switch (state) {
+    case 'not-installed':
+      return 'Extension not installed';
+    case 'solo':
+      return 'Connected · solo node';
+    case 'connected':
+      return 'Connected';
+    case 'disconnected':
+      return 'Disconnected';
+  }
 }
 
 const MeshNodeViz: FC<{ self: MeshStatus; peers: MeshPeer[] }> = ({ self, peers }) => {
@@ -129,23 +195,27 @@ export const DaemonMesh: FC<SettingsProps> = () => {
   const [status, setStatus] = useState<MeshStatus | null>(null);
   const [peers, setPeers] = useState<MeshPeer[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [meshExtensionLoaded, setMeshExtensionLoaded] = useState<boolean | null>(null);
   const [live, setLive] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [sRes, pRes] = await Promise.all([
+      const [sRes, pRes, eRes] = await Promise.all([
         app.daemon.meshStatus(),
         app.daemon.meshPeers(),
+        app.daemon.extensions(),
       ]);
 
       if (sRes.ok && sRes.data) {
         setStatus(sRes.data as MeshStatus);
       }
       if (pRes.ok && pRes.data) {
-        const arr = Array.isArray(pRes.data) ? pRes.data : (pRes.data as { peers?: MeshPeer[] }).peers || [];
-        setPeers(arr as MeshPeer[]);
+        setPeers(normalizeList<MeshPeer>(pRes.data, 'peers'));
+      }
+      if (eRes.ok && eRes.data) {
+        setMeshExtensionLoaded(isMeshExtensionLoaded(normalizeList<ExtensionInfo>(eRes.data, 'extensions')));
       }
 
       if (!sRes.ok && !pRes.ok) {
@@ -166,6 +236,11 @@ export const DaemonMesh: FC<SettingsProps> = () => {
     return () => clearInterval(interval);
   }, [refresh, live]);
 
+  const currentState = meshState(status, peers, meshExtensionLoaded, error);
+  const isMeshReady = currentState === 'connected' || currentState === 'solo';
+  const currentPeerCount = peerCount(status, peers);
+  const currentReachableCount = reachableCount(status, peers);
+
   if (error && !status) {
     return (
       <div className="space-y-4">
@@ -178,9 +253,13 @@ export const DaemonMesh: FC<SettingsProps> = () => {
         <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 text-xs">
           <div className="flex items-center gap-2 text-red-400">
             <AlertTriangleIcon className="h-4 w-4" />
-            <span>{error}</span>
+            <span>{meshStateLabel(currentState)}</span>
           </div>
-          <p className="mt-2 text-muted-foreground">Mesh topology requires the daemon to be running with mesh support enabled.</p>
+          <p className="mt-2 text-muted-foreground">
+            {currentState === 'not-installed'
+              ? "Add lex-mesh to your daemon's Gemfile to enable agent mesh."
+              : error}
+          </p>
         </div>
       </div>
     );
@@ -231,8 +310,8 @@ export const DaemonMesh: FC<SettingsProps> = () => {
                 <HeartPulseIcon className="h-3.5 w-3.5" />
                 Status
               </div>
-              <p className={`mt-1 text-xs font-semibold ${status?.connected ? 'text-emerald-400' : 'text-red-400'}`}>
-                {status?.connected ? 'Connected' : 'Disconnected'}
+              <p className={`mt-1 text-xs font-semibold ${isMeshReady ? 'text-emerald-400' : currentState === 'not-installed' ? 'text-amber-400' : 'text-red-400'}`}>
+                {meshStateLabel(currentState)}
               </p>
               {status?.role && <p className="text-[10px] text-muted-foreground">{status.role}</p>}
             </div>
@@ -241,9 +320,9 @@ export const DaemonMesh: FC<SettingsProps> = () => {
                 <WifiIcon className="h-3.5 w-3.5" />
                 Peers
               </div>
-              <p className="mt-1 text-xs font-semibold">{status?.peer_count ?? peers.length}</p>
+              <p className="mt-1 text-xs font-semibold">{currentPeerCount}</p>
               <p className="text-[10px] text-muted-foreground">
-                {peers.filter((p) => p.status !== 'unreachable' && p.status !== 'disconnected').length} reachable
+                {currentReachableCount} reachable
               </p>
             </div>
             <div className="rounded-xl border border-border/40 bg-card/60 p-3">
@@ -255,6 +334,12 @@ export const DaemonMesh: FC<SettingsProps> = () => {
               {status?.gossip_interval_ms && <p className="text-[10px] text-muted-foreground">gossip: {status.gossip_interval_ms}ms</p>}
             </div>
           </div>
+
+          {currentState === 'not-installed' && (
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-xs text-amber-700 dark:text-amber-300">
+              Add lex-mesh to your daemon&apos;s Gemfile to enable agent mesh.
+            </div>
+          )}
 
           {/* Topology visualization */}
           {status && peers.length > 0 && (

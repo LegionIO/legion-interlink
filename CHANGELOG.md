@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.11] - 2026-04-27
+
+### Fixed
+- Mesh settings tab now checks loaded extensions and daemon mesh flags so it can distinguish missing `lex-mesh`, solo-node operation, and real disconnected states (#57)
+
 ## [1.1.10] - 2026-04-27
 
 ### Fixed
