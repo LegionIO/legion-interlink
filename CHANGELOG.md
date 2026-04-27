@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.21] - 2026-04-27
+
+### Added
+- Streaming response status now samples a stable verb from a spinner verb list for each new agent turn, with a Thinking fallback if the list is empty (#46)
+
 ## [1.1.20] - 2026-04-27
 
 ### Fixed
