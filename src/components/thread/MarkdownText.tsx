@@ -6,7 +6,7 @@ import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import { RefreshCwIcon } from 'lucide-react';
 import { CodeBlock } from './CodeBlock';
 import { cn } from '@/lib/utils';
-import { unwrapContentString } from '@/lib/utils/unwrap-content';
+import { unwrapContentString } from '@/lib/unwrap-content';
 
 const rehypeSanitizeOptions = {
   ...defaultSchema,

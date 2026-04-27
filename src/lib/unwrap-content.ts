@@ -6,6 +6,12 @@
  * as a raw string. This strips that wrapper and returns the plain text content.
  *
  * Safe to call on any string — returns it unchanged if it's not JSON-wrapped.
+ *
+ * NOTE: The main process has a similar normalizeAssistantText() in
+ * electron/agent/app-runtime.ts that handles this at the streaming/parse layer.
+ * This renderer-side utility is a safety net for paths that bypass main-process
+ * normalization (sub-agent threads, sidechains, rehydrated messages, etc.).
+ * If you change the unwrap logic here, check normalizeAssistantText too.
  */
 export function unwrapContentString(content: string): string {
   if (!content) return content
@@ -29,10 +35,13 @@ export function unwrapContentString(content: string): string {
 
     const extracted = textBlocks
       .map((block: Record<string, unknown>) => {
-        return (block.text as string) || (block.content as string) || ''
+        const text = typeof block.text === 'string' ? block.text
+          : typeof block.content === 'string' ? block.content
+          : ''
+        return text
       })
       .filter(Boolean)
-      .join('\n')
+      .join('\n\n')
 
     return extracted || content
   } catch {
