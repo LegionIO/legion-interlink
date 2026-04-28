@@ -432,6 +432,11 @@ async function* consumeDaemonSSE(
         return text ? [{ conversationId, type: 'text-delta', text }] : [];
       }
 
+      if (eventName === 'thinking-delta' || eventName === 'thinking_delta') {
+        const text = normalizeAssistantText(payload.text ?? payload.delta ?? payload.thinking);
+        return text ? [{ conversationId, type: 'thinking-delta', text }] : [];
+      }
+
       if (eventName === 'tool-call' || eventName === 'tool_call') {
         return [{
           conversationId,

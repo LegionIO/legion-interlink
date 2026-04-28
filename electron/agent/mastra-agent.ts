@@ -9,7 +9,7 @@ export type { ReasoningEffort } from './model-catalog.js';
 
 export type StreamEvent = {
   conversationId: string;
-  type: 'text-delta' | 'observer-message' | 'tool-call' | 'tool-result' | 'tool-error' | 'tool-progress' | 'tool-compaction' | 'error' | 'done' | 'compaction' | 'context-usage' | 'model-fallback' | 'enrichment';
+  type: 'text-delta' | 'thinking-delta' | 'observer-message' | 'tool-call' | 'tool-result' | 'tool-error' | 'tool-progress' | 'tool-compaction' | 'error' | 'done' | 'compaction' | 'context-usage' | 'model-fallback' | 'enrichment';
   text?: string;
   toolCallId?: string;
   toolName?: string;

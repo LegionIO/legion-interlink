@@ -1481,6 +1481,8 @@ export function RuntimeProvider({
           }
         }
         applyTextDelta(acc, e.text ?? '');
+      } else if (e.type === 'thinking-delta') {
+        return;
       } else if (e.type === 'realtime-user-transcript') {
         // Realtime audio: create/update a user message for spoken text
         const itemId = (e as { itemId?: string }).itemId ?? msgId();

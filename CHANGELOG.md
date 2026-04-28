@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.23] - 2026-04-28
+
+### Fixed
+- Daemon SSE clients now recognize `thinking-delta` events from legion-llm reasoning streams without appending reasoning text to assistant chat responses.
+
 ## [1.1.22] - 2026-04-27
 
 ### Fixed

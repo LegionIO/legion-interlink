@@ -104,18 +104,28 @@ export class DaemonChatClient {
     let buffer = '';
     let streamDone = false;
     let streamError: string | undefined;
+    let currentEventName = '';
 
     const processLine = (line: string): void => {
       const trimmed = line.replace(/\r$/, '');
-      if (!trimmed || trimmed.startsWith(':') || trimmed.startsWith('event:')) return;
+      if (!trimmed || trimmed.startsWith(':')) return;
+      if (trimmed.startsWith('event:')) {
+        currentEventName = trimmed.slice(6).trim();
+        return;
+      }
       if (!trimmed.startsWith('data:')) return;
       const raw = trimmed.slice(5).trimStart();
       if (!raw || raw === '[DONE]') {
         streamDone = true;
+        currentEventName = '';
         return;
       }
       try {
         const parsed = JSON.parse(raw) as { text?: string; delta?: string; done?: boolean; error?: string };
+        const eventName = currentEventName;
+        currentEventName = '';
+        if (eventName === 'thinking-delta' || eventName === 'thinking_delta') return;
+
         if (parsed.error) {
           streamError = parsed.error;
           streamDone = true;
@@ -131,6 +141,10 @@ export class DaemonChatClient {
           onChunk(delta);
         }
       } catch {
+        const eventName = currentEventName;
+        currentEventName = '';
+        if (eventName === 'thinking-delta' || eventName === 'thinking_delta') return;
+
         // Non-JSON data line — forward as raw text delta
         fullText += raw;
         onChunk(raw);
