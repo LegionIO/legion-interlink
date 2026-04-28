@@ -48,6 +48,26 @@ describe('normalizeProviderModelObjects', () => {
     );
   });
 
+  it('reads LegionIO provider-health inventory responses', () => {
+    assert.deepEqual(
+      normalizeProviderModelObjects({
+        providers: [
+          {
+            provider: 'anthropic',
+            circuit: 'closed',
+            adjustment: 0,
+            healthy: true,
+            offerings: 1,
+            models: ['claude-sonnet-4-6'],
+            types: ['inference'],
+            instances: ['bedrock-east-2'],
+          },
+        ],
+      }),
+      [{ id: 'claude-sonnet-4-6', owned_by: 'anthropic' }],
+    );
+  });
+
   it('ignores malformed entries and still returns usable model identifiers', () => {
     assert.deepEqual(
       normalizeProviderModelObjects({

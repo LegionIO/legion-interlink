@@ -246,7 +246,7 @@ const ProviderLayerSection: FC<{
   const fetchProviders = useCallback(async () => {
     setLoadingProviders(true);
     try {
-      const res = await app.daemon.capabilities();
+      const res = await app.daemon.llmProviders();
       if (res.ok && res.data) {
         const data = res.data as Record<string, unknown>;
         const list = Array.isArray(data.providers)

@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.25] - 2026-04-28
+
+### Fixed
+- LLM router settings now refresh live offering sources through the daemon provider inventory endpoint instead of the generic capabilities endpoint.
+
 ## [1.1.24] - 2026-04-28
 
 ### Fixed
