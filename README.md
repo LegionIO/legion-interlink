@@ -59,6 +59,7 @@ This starts the Electron app with the renderer and main process in watch mode.
 
 ```bash
 pnpm lint
+pnpm test
 pnpm type-check
 pnpm build
 pnpm preview
@@ -98,7 +99,7 @@ The app maintains a model catalog plus provider settings. The current implementa
 - Google
 - Amazon Bedrock
 
-Users can choose a default model and switch models per conversation.
+Users can choose a default model and switch models per conversation. When a local daemon is reachable, model discovery can also use daemon model and provider inventory before falling back to the local catalog.
 
 ### Tools
 

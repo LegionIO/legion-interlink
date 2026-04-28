@@ -436,9 +436,6 @@ export function registerDaemonApiHandlers(
   ipcMain.handle('daemon:llm-providers', async () =>
     daemonGet(cfg(), appHome, '/api/llm/providers'));
 
-  ipcMain.handle('daemon:llm-provider-layer', async () =>
-    daemonGet(cfg(), appHome, '/api/llm/provider_layer'));
-
   // ── Context Curation (legion-llm v0.6.0) ──
   ipcMain.handle('daemon:llm-context-curation-status', async () =>
     daemonGet(cfg(), appHome, '/api/llm/context_curation/status'));

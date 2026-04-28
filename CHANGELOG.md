@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.25] - 2026-04-28
+
+### Fixed
+- LLM router settings now refresh live offering sources through the daemon provider inventory endpoint instead of the generic capabilities endpoint.
+
+## [1.1.24] - 2026-04-28
+
+### Fixed
+- Daemon LLM model discovery now accepts both legacy provider responses and native inventory responses from the routing redesign, and settings now uses router/offering wording while loading older mode values.
+
 ## [1.1.23] - 2026-04-28
 
 ### Fixed

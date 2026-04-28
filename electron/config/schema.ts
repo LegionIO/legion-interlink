@@ -411,11 +411,18 @@ const tokenBudgetConfigSchema = z.object({
   dailyMaxTokens: z.number().positive().nullable().default(null),
 });
 
-const providerLayerConfigSchema = z.object({
-  mode: z.enum(['ruby_llm', 'native', 'auto']).default('ruby_llm'),
+export const providerLayerConfigSchema = z.object({
+  mode: z.enum(['daemon_router', 'native_offerings', 'auto', 'ruby_llm', 'native']).default('daemon_router'),
   nativeProviders: z.array(z.string()).default(['claude', 'bedrock']),
-  fallbackToRubyLlm: z.boolean().default(true),
-});
+  fallbackToDaemonRouter: z.boolean().optional(),
+  fallbackToRubyLlm: z.boolean().optional(),
+}).transform((config) => ({
+  mode: config.mode === 'native'
+    ? 'native_offerings' as const
+    : config.mode === 'ruby_llm' ? 'daemon_router' as const : config.mode,
+  nativeProviders: config.nativeProviders,
+  fallbackToDaemonRouter: config.fallbackToDaemonRouter ?? config.fallbackToRubyLlm ?? true,
+}));
 
 const tierRoutingConfigSchema = z.object({
   enabled: z.boolean().default(true),
