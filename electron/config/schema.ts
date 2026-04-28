@@ -412,7 +412,7 @@ const tokenBudgetConfigSchema = z.object({
 });
 
 const providerLayerConfigSchema = z.object({
-  mode: z.enum(['ruby_llm', 'native', 'auto']).default('ruby_llm'),
+  mode: z.enum(['daemon_router', 'native_offerings', 'auto', 'ruby_llm', 'native']).default('daemon_router'),
   nativeProviders: z.array(z.string()).default(['claude', 'bedrock']),
   fallbackToRubyLlm: z.boolean().default(true),
 });

@@ -15,6 +15,7 @@
     "compile:swift": "bash scripts/compile-swift-helper.sh",
     "generate:builder": "tsx scripts/generate-builder-config.ts",
     "build:mac": "pnpm compile:swift && pnpm build && pnpm generate:builder && electron-builder --mac --config",
+    "test": "node --import tsx --test \"electron/**/*.test.ts\"",
     "lint": "eslint .",
     "type-check": "tsc --noEmit"
   },
