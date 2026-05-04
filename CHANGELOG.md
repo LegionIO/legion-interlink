@@ -1,5 +1,30 @@
 # Changelog
 
+## [2.0.0] - 2026-05-04
+
+### Changed
+- **BREAKING**: Replaced the Electron desktop chat client with a native Swift macOS menu bar app. Legion Interlink is no longer a desktop chat UI — it is a menu bar utility that bootstraps, monitors, and controls the LegionIO daemon stack (legionio, redis, memcached, ollama).
+- Minimum macOS version raised from 10.13 to 13 (Ventura).
+- App size reduced from ~454MB (Electron + Chromium + Node) to ~592KB (native Swift binary).
+
+### Added
+- Menu bar item with Legion icon and live status badge reflecting daemon health.
+- Native dashboard window with five tabs: Services (default), Logs, Extensions, Workers, Settings.
+- Service cards with start/stop controls, daemon component readiness indicators, and start-all / stop-all actions.
+- Live daemon log viewer with auto-scroll toggle and clear.
+- Search filtering across Extensions, Workers, and Settings tabs.
+- First-launch onboarding that auto-starts services and installs the agentic extension pack when `~/.legionio/.packs/agentic` is absent.
+- Health polling that updates service status within 5 seconds of state changes.
+- Launch-at-login toggle.
+- Universal binary builds (arm64 + x86_64) with code signing, notarization, and Homebrew Cask updates wired into release CI.
+
+### Removed
+- All Electron, React, TypeScript, and Node.js code (~70k lines, 245+ files), including the chat thread, sub-agent views, MCP integration UI, skills UI, memory/compaction settings UI, and trigger workflow components.
+- All npm dependencies (52 known vulnerabilities eliminated).
+
+### Migration
+Chat and AI assistant functionality has moved to **Kai** (`brew install --cask legionio/tap/kai`), which connects to the same legionio daemon stack via the `kai-plugin-legion` plugin. Legion Interlink now exists solely to manage the daemon services.
+
 ## [1.1.6] - 2026-04-22
 
 ### Changed
