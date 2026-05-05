@@ -61,8 +61,9 @@ type DaemonLlmConfig = {
     dailyMaxTokens?: number | null;
   };
   providerLayer?: {
-    mode?: 'ruby_llm' | 'native' | 'auto';
+    mode?: 'daemon_router' | 'native_offerings' | 'auto' | 'ruby_llm' | 'native';
     nativeProviders?: string[];
+    fallbackToDaemonRouter?: boolean;
     fallbackToRubyLlm?: boolean;
   };
   tierRouting?: {
@@ -74,6 +75,8 @@ type DaemonLlmConfig = {
     pipelineEnabled?: boolean;
   };
 };
+
+type ProviderRoutingMode = NonNullable<NonNullable<DaemonLlmConfig['providerLayer']>['mode']>;
 
 // ── Live status types ─────────────────────────────────────────────────────────
 
@@ -111,6 +114,50 @@ function numOrNull(raw: string): number | null {
   if (trimmed === '') return null;
   const n = Number(trimmed);
   return isNaN(n) ? null : n;
+}
+
+function record(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null ? value as Record<string, unknown> : null;
+}
+
+function providerName(value: Record<string, unknown>): string | null {
+  for (const key of ['provider', 'name']) {
+    const raw = value[key];
+    if (typeof raw === 'string' && raw.trim() !== '') return raw.trim();
+  }
+  return null;
+}
+
+function modelCount(value: Record<string, unknown>): number | undefined {
+  const raw = value.models;
+  if (Array.isArray(raw)) return raw.length;
+  if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
+  return undefined;
+}
+
+function normalizeProviderInfo(value: unknown): ProviderInfo | null {
+  const item = record(value);
+  if (!item) return null;
+
+  const name = providerName(item);
+  if (!name) return null;
+
+  const enabled = typeof item.enabled === 'boolean'
+    ? item.enabled
+    : typeof item.healthy === 'boolean' ? item.healthy : undefined;
+  const models = modelCount(item);
+
+  return {
+    name,
+    ...(enabled == null ? {} : { enabled }),
+    ...(models == null ? {} : { models }),
+  };
+}
+
+function normalizeRoutingMode(mode: ProviderRoutingMode | undefined): 'daemon_router' | 'native_offerings' | 'auto' {
+  if (mode === 'native' || mode === 'native_offerings') return 'native_offerings';
+  if (mode === 'auto') return 'auto';
+  return 'daemon_router';
 }
 
 // ── Collapsible section wrapper ───────────────────────────────────────────────
@@ -181,16 +228,16 @@ const NullableNumberInput: FC<{
   );
 };
 
-// ── Provider Layer section ────────────────────────────────────────────────────
+// ── LLM routing section ───────────────────────────────────────────────────────
 
 const ProviderLayerSection: FC<{
   daemonLlm: DaemonLlmConfig;
   updateConfig: (path: string, value: unknown) => Promise<void>;
 }> = ({ daemonLlm, updateConfig }) => {
   const pl = daemonLlm.providerLayer ?? {};
-  const mode = pl.mode ?? 'ruby_llm';
+  const mode = normalizeRoutingMode(pl.mode);
   const nativeProviders = pl.nativeProviders ?? ['claude', 'bedrock'];
-  const fallback = pl.fallbackToRubyLlm ?? true;
+  const fallback = pl.fallbackToDaemonRouter ?? pl.fallbackToRubyLlm ?? true;
 
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [loadingProviders, setLoadingProviders] = useState(false);
@@ -199,10 +246,12 @@ const ProviderLayerSection: FC<{
   const fetchProviders = useCallback(async () => {
     setLoadingProviders(true);
     try {
-      const res = await app.daemon.capabilities();
+      const res = await app.daemon.llmProviders();
       if (res.ok && res.data) {
         const data = res.data as Record<string, unknown>;
-        const list = Array.isArray(data.providers) ? data.providers as ProviderInfo[] : [];
+        const list = Array.isArray(data.providers)
+          ? data.providers.map(normalizeProviderInfo).filter((p): p is ProviderInfo => p != null)
+          : [];
         setProviders(list);
       }
     } catch {
@@ -226,32 +275,32 @@ const ProviderLayerSection: FC<{
   };
 
   return (
-    <Section icon={ServerIcon} title="Provider Layer" description="How the daemon routes LLM calls" defaultOpen>
+    <Section icon={ServerIcon} title="LLM Router" description="How the daemon chooses model offerings" defaultOpen>
       <div>
-        <label className="text-[10px] text-muted-foreground block mb-0.5">Mode</label>
+        <label className="text-[10px] text-muted-foreground block mb-0.5">Routing Mode</label>
         <select
           className={settingsSelectClass}
           value={mode}
           onChange={(e) => updateConfig('appConfig.daemonLlm.providerLayer.mode', e.target.value)}
         >
-          <option value="ruby_llm">ruby_llm (default Ruby LLM provider)</option>
-          <option value="native">native (Electron-side providers only)</option>
-          <option value="auto">auto (prefer native, fall back to ruby_llm)</option>
+          <option value="daemon_router">Daemon router (default)</option>
+          <option value="native_offerings">Native offerings only</option>
+          <option value="auto">Automatic fallback routing</option>
         </select>
         <p className="text-[10px] text-muted-foreground/70 mt-0.5">
-          Controls whether the daemon uses its built-in ruby_llm layer, native Electron providers, or both.
+          Controls whether requests use daemon-managed routing, local native offerings, or automatic fallback.
         </p>
       </div>
 
       <Toggle
-        label="Fall back to ruby_llm if native provider fails"
+        label="Fall back to daemon router if a native offering fails"
         checked={fallback}
-        onChange={(v) => updateConfig('appConfig.daemonLlm.providerLayer.fallbackToRubyLlm', v)}
+        onChange={(v) => updateConfig('appConfig.daemonLlm.providerLayer.fallbackToDaemonRouter', v)}
       />
 
       <div>
         <div className="flex items-center justify-between mb-1">
-          <label className="text-[10px] text-muted-foreground">Native Providers</label>
+          <label className="text-[10px] text-muted-foreground">Native Offerings</label>
           <button
             type="button"
             onClick={() => void fetchProviders()}
@@ -290,7 +339,7 @@ const ProviderLayerSection: FC<{
           <input
             type="text"
             className="flex-1 rounded-xl border border-border/70 bg-card/80 px-3 py-1.5 text-xs outline-none font-mono"
-            placeholder="provider name (e.g. openai)"
+            placeholder="offering source (e.g. openai)"
             value={newProvider}
             onChange={(e) => setNewProvider(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') addProvider(); }}
@@ -307,7 +356,7 @@ const ProviderLayerSection: FC<{
 
         {providers.length > 0 && (
           <p className="text-[10px] text-muted-foreground/60 mt-1">
-            {providers.length} provider{providers.length !== 1 ? 's' : ''} registered in daemon
+            {providers.length} offering source{providers.length !== 1 ? 's' : ''} registered in daemon
           </p>
         )}
       </div>

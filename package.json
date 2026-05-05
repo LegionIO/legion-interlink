@@ -1,7 +1,7 @@
 {
   "name": "legion-interlink",
   "productName": "Legion Interlink",
-  "version": "1.1.23",
+  "version": "1.1.25",
   "description": "Legion Interlink - Local AI Assistant",
   "main": "./out/main/index.js",
   "type": "module",
@@ -15,6 +15,7 @@
     "compile:swift": "bash scripts/compile-swift-helper.sh",
     "generate:builder": "tsx scripts/generate-builder-config.ts",
     "build:mac": "pnpm compile:swift && pnpm build && pnpm generate:builder && electron-builder --mac --config",
+    "test": "node --import tsx --test \"electron/**/*.test.ts\"",
     "lint": "eslint .",
     "type-check": "tsc --noEmit"
   },

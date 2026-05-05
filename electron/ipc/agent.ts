@@ -11,6 +11,7 @@ import { daemonGet } from '../lib/daemon-client.js';
 import type { ToolDefinition } from '../tools/types.js';
 import { ensureSafeToolDefinitions } from '../tools/naming.js';
 import { sendSubAgentFollowUp, stopSubAgent, getActiveSubAgentIds } from '../tools/sub-agent.js';
+import { normalizeProviderModelObjects, type OpenAIModelObject } from './llm-provider-models.js';
 
 type DaemonModelEntry = {
   key: string;
@@ -24,11 +25,6 @@ type DaemonModelEntry = {
 type DaemonModelCatalog = {
   models: DaemonModelEntry[];
   defaultKey: string | null;
-};
-
-type OpenAIModelObject = { id: string; owned_by?: string };
-type ProvidersResponse = {
-  providers?: Array<{ name: string; default_model?: string }>;
 };
 
 async function fetchDaemonModels(
@@ -48,12 +44,9 @@ async function fetchDaemonModels(
   }
 
   if (modelList.length === 0) {
-    const providersResult = await daemonGet<ProvidersResponse>(config, appHome, '/api/llm/providers');
+    const providersResult = await daemonGet<unknown>(config, appHome, '/api/llm/providers');
     if (providersResult.ok && providersResult.data) {
-      const providers = providersResult.data.providers ?? [];
-      modelList = providers
-        .filter((p) => p.default_model)
-        .map((p) => ({ id: p.default_model!, owned_by: p.name }));
+      modelList = normalizeProviderModelObjects(providersResult.data);
     }
   }
 

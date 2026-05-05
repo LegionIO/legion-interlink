@@ -157,6 +157,7 @@ const appAPI = {
     absorberDispatch: (input: string, scope?: string) => ipcRenderer.invoke('daemon:absorber-dispatch', input, scope),
     absorberJob: (jobId: string) => ipcRenderer.invoke('daemon:absorber-job', jobId),
     llmModels: () => ipcRenderer.invoke('daemon:llm-models'),
+    llmProviders: () => ipcRenderer.invoke('daemon:llm-providers'),
     health: () => ipcRenderer.invoke('daemon:health'),
     ready: () => ipcRenderer.invoke('daemon:ready'),
     metrics: () => ipcRenderer.invoke('daemon:metrics'),
