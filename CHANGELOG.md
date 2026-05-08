@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.26] - 2026-05-08
+
+### Fixed
+- Daemon-mode client tool calls now execute in Interlink, emit local tool results, and continue the daemon LLM turn with tool result context instead of ending the stream with hung tool cards.
+
 ## [1.1.25] - 2026-04-28
 
 ### Fixed

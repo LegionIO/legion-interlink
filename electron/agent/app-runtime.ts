@@ -5,12 +5,17 @@ import { resolveDaemonUrl, resolveAuthToken } from '../lib/daemon-client.js';
 import type { LLMModelConfig, LLMProviderType } from './model-catalog.js';
 import type { StreamEvent } from './mastra-agent.js';
 import { withBrandUserAgent } from '../utils/user-agent.js';
+import type { ToolDefinition } from '../tools/types.js';
+import { findToolByName } from '../tools/naming.js';
 
 export type AgentBackend = 'mastra' | 'legion-daemon';
 
 type RuntimeMessage = {
   role: string;
   content: unknown;
+  tool_calls?: Array<{ id: string; name: string; arguments: unknown }>;
+  tool_call_id?: string;
+  name?: string;
 };
 
 export type AppStatus = {
@@ -45,7 +50,18 @@ type StreamAppOptions = {
   abortSignal?: AbortSignal;
   reasoningEffort?: string;
   tools?: ToolSchema[];
+  executableTools?: ToolDefinition[];
   cwd?: string;
+};
+
+type ExecutedClientToolCall = {
+  id: string;
+  name: string;
+  args: unknown;
+  result: unknown;
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
 };
 
 type RuntimeConfig = NonNullable<AppConfig['runtime']>;
@@ -268,6 +284,124 @@ function normalizeDaemonEventName(eventName: string | undefined, payload: Record
   return typeof payloadType === 'string' ? payloadType.trim() : '';
 }
 
+function normalizeToolArgs(args: unknown): Record<string, unknown> {
+  if (typeof args === 'string') {
+    const trimmed = args.trim();
+    if (!trimmed) return {};
+    try {
+      const parsed = JSON.parse(trimmed) as unknown;
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? parsed as Record<string, unknown>
+        : {};
+    } catch {
+      return {};
+    }
+  }
+
+  return args && typeof args === 'object' && !Array.isArray(args)
+    ? args as Record<string, unknown>
+    : {};
+}
+
+function buildDaemonRequestBody(
+  options: StreamAppOptions,
+  messages: RuntimeMessage[],
+  effectiveModel: string | undefined,
+  effectiveProvider: string | undefined,
+): Record<string, unknown> {
+  const requestBody: Record<string, unknown> = {
+    messages,
+    ...(effectiveModel ? { model: effectiveModel } : {}),
+    ...(effectiveProvider ? { provider: effectiveProvider } : {}),
+    ...(options.tools?.length ? { tools: options.tools } : {}),
+    ...(options.cwd ? { cwd: options.cwd } : {}),
+    ...(options.conversationId ? { conversation_id: options.conversationId } : {}),
+  };
+
+  if (options.reasoningEffort) {
+    requestBody.reasoning_effort = options.reasoningEffort;
+  }
+
+  const knowledgeConfig = options.config.knowledge as { ragEnabled?: boolean; captureEnabled?: boolean; scope?: string } | undefined;
+  if (knowledgeConfig?.ragEnabled !== undefined) {
+    requestBody.rag_enabled = knowledgeConfig.ragEnabled;
+  }
+  if (knowledgeConfig?.captureEnabled !== undefined) {
+    requestBody.capture_enabled = knowledgeConfig.captureEnabled;
+  }
+  if (knowledgeConfig?.scope) {
+    requestBody.knowledge_scope = knowledgeConfig.scope;
+  }
+
+  return requestBody;
+}
+
+async function executeClientToolCall(
+  options: StreamAppOptions,
+  event: StreamEvent,
+  startedAt: string,
+): Promise<ExecutedClientToolCall | null> {
+  if (!event.toolCallId || !event.toolName) return null;
+
+  const tool = findToolByName(options.executableTools ?? [], event.toolName);
+  if (!tool) return null;
+
+  const startedMs = Date.parse(startedAt);
+  const args = normalizeToolArgs(event.args);
+  let result: unknown;
+
+  try {
+    result = await tool.execute(args, {
+      toolCallId: event.toolCallId,
+      conversationId: options.conversationId,
+      cwd: options.cwd,
+      abortSignal: options.abortSignal,
+    });
+  } catch (error) {
+    result = { isError: true, error: error instanceof Error ? error.message : String(error) };
+  }
+
+  const finishedAt = new Date().toISOString();
+  const finishedMs = Date.parse(finishedAt);
+
+  return {
+    id: event.toolCallId,
+    name: event.toolName,
+    args,
+    result,
+    startedAt,
+    finishedAt,
+    durationMs: Number.isFinite(startedMs) && Number.isFinite(finishedMs)
+      ? Math.max(0, finishedMs - startedMs)
+      : 0,
+  };
+}
+
+function appendToolContinuationMessages(
+  messages: RuntimeMessage[],
+  assistantText: string,
+  toolCalls: ExecutedClientToolCall[],
+): RuntimeMessage[] {
+  return [
+    ...messages,
+    {
+      role: 'assistant',
+      content: assistantText,
+      tool_calls: toolCalls.map((toolCall) => ({
+        id: toolCall.id,
+        name: toolCall.name,
+        arguments: toolCall.args,
+      })),
+    },
+    ...toolCalls.map((toolCall) => ({
+      role: 'tool',
+      content: stringifyValue(toolCall.result, 12_000),
+      tool_call_id: toolCall.id,
+      name: toolCall.name,
+    })),
+  ];
+}
+
 async function* streamDaemonApp(options: StreamAppOptions): AsyncGenerator<StreamEvent> {
   const daemonUrl = resolveDaemonUrl(options.config);
   const readyUrl = new URL('/api/ready', daemonUrl).toString();
@@ -324,62 +458,102 @@ async function* streamDaemonApp(options: StreamAppOptions): AsyncGenerator<Strea
   const effectiveModel = isPassthrough ? daemonModelOverride : selectedModel;
   const effectiveProvider = isPassthrough ? daemonProviderOverride : mapProviderForDaemon(selectedProvider);
 
-  const requestBody: Record<string, unknown> = {
-    messages: normalizedMessages,
-    ...(effectiveModel ? { model: effectiveModel } : {}),
-    ...(effectiveProvider ? { provider: effectiveProvider } : {}),
-    ...(options.tools?.length ? { tools: options.tools } : {}),
-    ...(options.cwd ? { cwd: options.cwd } : {}),
-    ...(options.conversationId ? { conversation_id: options.conversationId } : {}),
-  };
-  if (options.reasoningEffort) {
-    requestBody.reasoning_effort = options.reasoningEffort;
-  }
-  const knowledgeConfig = options.config.knowledge as { ragEnabled?: boolean; captureEnabled?: boolean; scope?: string } | undefined;
-  if (knowledgeConfig?.ragEnabled !== undefined) {
-    requestBody.rag_enabled = knowledgeConfig.ragEnabled;
-  }
-  if (knowledgeConfig?.captureEnabled !== undefined) {
-    requestBody.capture_enabled = knowledgeConfig.captureEnabled;
-  }
-  if (knowledgeConfig?.scope) {
-    requestBody.knowledge_scope = knowledgeConfig.scope;
-  }
-
   const useStreaming = options.config.runtime?.daemon?.daemonStreaming !== false;
   if (useStreaming) {
-    let streamResponse: Response;
-    try {
-      streamResponse = await fetch(inferenceUrl, {
-        method: 'POST',
-        headers: withBrandUserAgent({
-          'content-type': 'application/json',
-          'accept': 'text/event-stream',
-          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-        }),
-        body: JSON.stringify({ ...requestBody, stream: true }),
-        signal: options.abortSignal,
-      });
-    } catch (error) {
-      yield {
-        conversationId: options.conversationId,
-        type: 'error',
-        error: `Daemon streaming request failed: ${error instanceof Error ? error.message : String(error)}`,
-      };
-      yield { conversationId: options.conversationId, type: 'done' };
-      return;
+    let roundMessages = normalizedMessages;
+    const maxToolRounds = Math.max(1, Math.min(20, Number(options.config.advanced?.maxSteps ?? 10) || 10));
+
+    for (let round = 0; round < maxToolRounds; round += 1) {
+      const requestBody = buildDaemonRequestBody(options, roundMessages, effectiveModel, effectiveProvider);
+      let streamResponse: Response;
+      try {
+        streamResponse = await fetch(inferenceUrl, {
+          method: 'POST',
+          headers: withBrandUserAgent({
+            'content-type': 'application/json',
+            'accept': 'text/event-stream',
+            ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+          }),
+          body: JSON.stringify({ ...requestBody, stream: true }),
+          signal: options.abortSignal,
+        });
+      } catch (error) {
+        yield {
+          conversationId: options.conversationId,
+          type: 'error',
+          error: `Daemon streaming request failed: ${error instanceof Error ? error.message : String(error)}`,
+        };
+        yield { conversationId: options.conversationId, type: 'done' };
+        return;
+      }
+
+      const contentType = streamResponse.headers.get('content-type') ?? '';
+      if (!streamResponse.ok || !contentType.includes('text/event-stream') || !streamResponse.body) {
+        yield* handleDaemonSyncResponse(options.conversationId, streamResponse, inferenceUrl, authToken, options.abortSignal, daemonUrl);
+        return;
+      }
+
+      const assistantTextParts: string[] = [];
+      const executedToolCalls: ExecutedClientToolCall[] = [];
+      let finalDone: StreamEvent | null = null;
+
+      for await (const event of consumeDaemonSSE(options.conversationId, streamResponse.body, options.abortSignal, false)) {
+        if (event.type === 'text-delta') {
+          assistantTextParts.push(event.text ?? '');
+          yield event;
+          continue;
+        }
+
+        if (event.type === 'tool-call') {
+          yield event;
+          const startedAt = event.startedAt ?? new Date().toISOString();
+          const executed = await executeClientToolCall(options, event, startedAt);
+          if (executed) {
+            executedToolCalls.push(executed);
+            yield {
+              conversationId: options.conversationId,
+              type: 'tool-result',
+              toolCallId: executed.id,
+              toolName: executed.name,
+              result: executed.result,
+              startedAt: executed.startedAt,
+              finishedAt: executed.finishedAt,
+              durationMs: executed.durationMs,
+            };
+          }
+          continue;
+        }
+
+        if (event.type === 'done') {
+          finalDone = event;
+          break;
+        }
+
+        yield event;
+      }
+
+      if (executedToolCalls.length === 0) {
+        yield finalDone ?? { conversationId: options.conversationId, type: 'done' };
+        return;
+      }
+
+      roundMessages = appendToolContinuationMessages(
+        roundMessages,
+        assistantTextParts.join(''),
+        executedToolCalls,
+      );
     }
 
-    const contentType = streamResponse.headers.get('content-type') ?? '';
-    if (streamResponse.ok && contentType.includes('text/event-stream') && streamResponse.body) {
-      yield* consumeDaemonSSE(options.conversationId, streamResponse.body, options.abortSignal);
-      return;
-    }
-
-    yield* handleDaemonSyncResponse(options.conversationId, streamResponse, inferenceUrl, authToken, options.abortSignal, daemonUrl);
+    yield {
+      conversationId: options.conversationId,
+      type: 'error',
+      error: `Daemon client tool loop exceeded ${maxToolRounds} rounds.`,
+    };
+    yield { conversationId: options.conversationId, type: 'done' };
     return;
   }
 
+  const requestBody = buildDaemonRequestBody(options, normalizedMessages, effectiveModel, effectiveProvider);
   const response = await fetch(inferenceUrl, {
     method: 'POST',
     headers: withBrandUserAgent({
@@ -398,11 +572,13 @@ async function* consumeDaemonSSE(
   conversationId: string,
   body: ReadableStream<Uint8Array>,
   abortSignal?: AbortSignal,
+  synthesizeDone = true,
 ): AsyncGenerator<StreamEvent> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
   let emittedAny = false;
+  let emittedDone = false;
   let currentEventName = '';
   let currentDataLines: string[] = [];
 
@@ -598,6 +774,7 @@ async function* consumeDaemonSSE(
           const events = await flushEvent();
           for (const event of events) {
             emittedAny = true;
+            if (event.type === 'done') emittedDone = true;
             yield event;
           }
           continue;
@@ -625,6 +802,7 @@ async function* consumeDaemonSSE(
     const trailingEvents = await flushEvent();
     for (const event of trailingEvents) {
       emittedAny = true;
+      if (event.type === 'done') emittedDone = true;
       yield event;
     }
   } catch (error) {
@@ -646,7 +824,9 @@ async function* consumeDaemonSSE(
       error: 'Daemon SSE stream ended without producing any output.',
     };
   }
-  yield { conversationId, type: 'done' };
+  if (synthesizeDone && !emittedDone) {
+    yield { conversationId, type: 'done' };
+  }
 }
 
 async function* handleDaemonSyncResponse(

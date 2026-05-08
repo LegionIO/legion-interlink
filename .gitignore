@@ -4,6 +4,8 @@ out/
 dist/
 build/bin/
 *.map
+Gemfile.lock
+*.gem
 .DS_Store
 .env
 .env.*

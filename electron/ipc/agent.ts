@@ -284,6 +284,7 @@ export function registerAgentHandlers(ipcMain: IpcMain, appHome: string): void {
             abortSignal: controller.signal,
             reasoningEffort,
             tools: toolSchemas,
+            executableTools: registeredTools,
             cwd: effectiveCwd,
           });
 
