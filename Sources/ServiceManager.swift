@@ -106,13 +106,35 @@ class ServiceManager: ObservableObject {
         return "/usr/local/bin/legionio"
     }
 
+    private static func findLogPath(brew: String) -> String {
+        // Ask brew where it routes the daemon's stdout/stderr — works on both
+        // Apple Silicon (/opt/homebrew) and Intel (/usr/local) installs.
+        let process = Process()
+        let pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: brew)
+        process.arguments = ["services", "info", "legionio", "--json"]
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            process.waitUntilExit()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            if let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+               let path = json.first?["log_path"] as? String, !path.isEmpty {
+                return path
+            }
+        } catch {}
+        // Fallback: standard homebrew log location
+        return "/opt/homebrew/var/log/legion/legion.log"
+    }
+
     init() {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         self.legionHome = "\(home)/.legionio"
-        self.logPath = "\(home)/.legionio/logs/tty-boot.log"
         self.agenticMarkerPath = "\(home)/.legionio/.packs/agentic"
         self.resolvedBrewPath = Self.findBrewPath()
         self.resolvedLegionioPath = Self.findLegionioPath()
+        self.logPath = Self.findLogPath(brew: self.resolvedBrewPath)
         checkSetupNeeded()
         startPolling()
     }

@@ -738,7 +738,7 @@ struct LogsTab: View {
                     .font(.system(size: 10, weight: .bold, design: .monospaced))
                     .foregroundColor(TerminalTheme.textDim)
 
-                Text("— ~/.legionio/logs/tty-boot.log")
+                Text("— brew services log")
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundColor(TerminalTheme.textDim.opacity(0.5))
 
