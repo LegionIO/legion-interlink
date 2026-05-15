@@ -109,7 +109,7 @@ class ServiceManager: ObservableObject {
     init() {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         self.legionHome = "\(home)/.legionio"
-        self.logPath = "\(home)/.legionio/legionio/logs/legion.log"
+        self.logPath = "\(home)/.legionio/logs/tty-boot.log"
         self.agenticMarkerPath = "\(home)/.legionio/.packs/agentic"
         self.resolvedBrewPath = Self.findBrewPath()
         self.resolvedLegionioPath = Self.findLegionioPath()
