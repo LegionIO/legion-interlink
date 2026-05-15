@@ -187,9 +187,11 @@ struct StatusWindowView: View {
 
     private static let tabServices = 0
     private static let tabLogs = 1
-    private static let tabExtensions = 2
-    private static let tabWorkers = 3
-    private static let tabSettings = 4
+    private static let tabIdentity = 2
+    private static let tabExtensions = 3
+    private static let tabWorkers = 4
+    private static let tabLLM = 5
+    private static let tabSettings = 6
 
     var body: some View {
         VStack(spacing: 0) {
@@ -202,12 +204,14 @@ struct StatusWindowView: View {
             // Tab content
             Group {
                 switch selectedTab {
-                case Self.tabServices: ServicesTab()
-                case Self.tabLogs: LogsTab()
+                case Self.tabServices:   ServicesTab()
+                case Self.tabLogs:       LogsTab()
+                case Self.tabIdentity:   IdentityTab()
                 case Self.tabExtensions: ExtensionsTab()
-                case Self.tabWorkers: WorkersTab()
-                case Self.tabSettings: DaemonSettingsTab()
-                default: ServicesTab()
+                case Self.tabWorkers:    WorkersTab()
+                case Self.tabLLM:        LLMTab()
+                case Self.tabSettings:   DaemonSettingsTab()
+                default:                 ServicesTab()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -345,11 +349,13 @@ struct StatusWindowView: View {
     private var tabBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 0) {
-                tabButton(title: "Services", icon: "server.rack", index: Self.tabServices)
-                tabButton(title: "Logs", icon: "terminal", index: Self.tabLogs)
+                tabButton(title: "Services",   icon: "server.rack",           index: Self.tabServices)
+                tabButton(title: "Logs",       icon: "terminal",              index: Self.tabLogs)
+                tabButton(title: "Identity",   icon: "person.badge.key",      index: Self.tabIdentity)
                 tabButton(title: "Extensions", icon: "puzzlepiece.extension", index: Self.tabExtensions)
-                tabButton(title: "Workers", icon: "gearshape.2", index: Self.tabWorkers)
-                tabButton(title: "Settings", icon: "gearshape", index: Self.tabSettings)
+                tabButton(title: "Workers",    icon: "gearshape.2",           index: Self.tabWorkers)
+                tabButton(title: "LLM",        icon: "cpu",                   index: Self.tabLLM)
+                tabButton(title: "Settings",   icon: "gearshape",             index: Self.tabSettings)
             }
             .padding(.horizontal, 8)
         }
@@ -732,7 +738,7 @@ struct LogsTab: View {
                     .font(.system(size: 10, weight: .bold, design: .monospaced))
                     .foregroundColor(TerminalTheme.textDim)
 
-                Text("— ~/.legionio/legionio/logs/legion.log")
+                Text("— stdout (live)")
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundColor(TerminalTheme.textDim.opacity(0.5))
 
@@ -788,8 +794,7 @@ struct LogsTab: View {
                 }
             }
         }
-        .onAppear { manager.startFastLogPolling() }
-        .onDisappear { manager.stopFastLogPolling() }
+        .background(TerminalTheme.bg)
     }
 }
 

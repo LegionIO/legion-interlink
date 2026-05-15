@@ -27,6 +27,45 @@ struct CachedWorker: Identifiable {
     let taskCount: Int
 }
 
+// MARK: - Identity / LLM Models
+
+struct CachedIdentity {
+    let id: String
+    let canonicalName: String
+    let kind: String
+    let trust: String
+    let mode: String
+    let registeredProviders: [CachedIdentityProvider]
+}
+
+struct CachedIdentityProvider: Identifiable {
+    let id: String          // provider name
+    let type: String        // "auth", "fallback"
+    let trustLevel: String
+    let capabilities: [String]
+    let status: String?     // from providers dict
+}
+
+struct CachedLLMProvider: Identifiable {
+    let id: String          // "provider:instance"
+    let provider: String
+    let instance: String
+    let tier: String
+    let capabilities: [String]
+    let circuitState: String
+    let credentialFingerprint: String?
+}
+
+struct CachedLLMModel: Identifiable {
+    let id: String
+    let types: [String]     // "inference", "embed"
+    let providers: [String]
+    let modelFamilies: [String]
+    let capabilities: [String]
+    let maxContext: Int?
+    let enabled: Bool
+}
+
 /// A single key/value setting from the daemon API.
 struct CachedSettingField: Identifiable {
     let id: String   // dotted key path, e.g. "cache.driver"
@@ -66,6 +105,24 @@ final class DaemonCache: ObservableObject {
     @Published var settingsLoaded = false
     @Published var settingsLoading = false
     @Published var settingsError: String?
+
+    // Identity
+    @Published var identity: CachedIdentity?
+    @Published var identityLoaded = false
+    @Published var identityLoading = false
+    @Published var identityError: String?
+
+    // LLM Providers
+    @Published var llmProviders: [CachedLLMProvider] = []
+    @Published var llmProvidersLoaded = false
+    @Published var llmProvidersLoading = false
+    @Published var llmProvidersError: String?
+
+    // LLM Models
+    @Published var llmModels: [CachedLLMModel] = []
+    @Published var llmModelsLoaded = false
+    @Published var llmModelsLoading = false
+    @Published var llmModelsError: String?
 
     private static let settingsDir: String = {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
@@ -209,6 +266,149 @@ final class DaemonCache: ObservableObject {
         }
         settingsLoaded = true
         settingsLoading = false
+    }
+
+    // MARK: - Identity
+
+    func loadIdentity(force: Bool = false) async {
+        guard !identityLoading else { return }
+        guard force || !identityLoaded else { return }
+
+        identityLoading = true
+        identityError = nil
+
+        let result = await DaemonAPI.get("/api/identity")
+
+        if result.ok, let dict = result.data as? [String: Any] {
+            identity = Self.parseIdentity(dict)
+        } else if !result.ok {
+            identityError = "Failed to load identity — is the daemon running?"
+        }
+        identityLoaded = true
+        identityLoading = false
+    }
+
+    private static func parseIdentity(_ dict: [String: Any]) -> CachedIdentity {
+        let id = dict["id"] as? String ?? "—"
+        let canonicalName = dict["canonical_name"] as? String ?? "—"
+        let kind = dict["kind"] as? String ?? "—"
+        let trust = dict["trust"] as? String ?? "—"
+        let mode = dict["mode"] as? String ?? "—"
+
+        // providers dict: { "kerberos": { status, trust, resolved_at }, ... }
+        let providerStatus: [String: String]
+        if let ps = dict["providers"] as? [String: Any] {
+            providerStatus = ps.compactMapValues { ($0 as? [String: Any])?["status"] as? String }
+        } else {
+            providerStatus = [:]
+        }
+
+        // registered_providers array
+        var regProviders: [CachedIdentityProvider] = []
+        if let rp = dict["registered_providers"] as? [[String: Any]] {
+            regProviders = rp.compactMap { p in
+                guard let name = p["name"] as? String else { return nil }
+                return CachedIdentityProvider(
+                    id: name,
+                    type: p["type"] as? String ?? "—",
+                    trustLevel: p["trust_level"] as? String ?? "—",
+                    capabilities: p["capabilities"] as? [String] ?? [],
+                    status: providerStatus[name]
+                )
+            }
+        }
+
+        return CachedIdentity(
+            id: id,
+            canonicalName: canonicalName,
+            kind: kind,
+            trust: trust,
+            mode: mode,
+            registeredProviders: regProviders
+        )
+    }
+
+    // MARK: - LLM Providers
+
+    func loadLLMProviders(force: Bool = false) async {
+        guard !llmProvidersLoading else { return }
+        guard force || !llmProvidersLoaded else { return }
+
+        llmProvidersLoading = true
+        llmProvidersError = nil
+
+        let result = await DaemonAPI.get("/api/llm/providers")
+
+        if result.ok, let dict = result.data as? [String: Any],
+           let items = dict["providers"] as? [[String: Any]] {
+            llmProviders = items.compactMap { Self.parseLLMProvider($0) }
+        } else if !result.ok {
+            llmProvidersError = "Failed to load LLM providers — is the daemon running?"
+        } else {
+            llmProviders = []
+        }
+        llmProvidersLoaded = true
+        llmProvidersLoading = false
+    }
+
+    private static func parseLLMProvider(_ dict: [String: Any]) -> CachedLLMProvider? {
+        guard let provider = dict["provider"] as? String,
+              let instance = dict["instance"] as? String else { return nil }
+        let tier = dict["tier"] as? String ?? "—"
+        let capabilities = dict["capabilities"] as? [String] ?? []
+        let circuitState = (dict["health"] as? [String: Any])?["circuit_state"] as? String ?? "—"
+        let fingerprint = dict["credential_fingerprint"] as? String
+        return CachedLLMProvider(
+            id: "\(provider):\(instance)",
+            provider: provider,
+            instance: instance,
+            tier: tier,
+            capabilities: capabilities,
+            circuitState: circuitState,
+            credentialFingerprint: fingerprint
+        )
+    }
+
+    // MARK: - LLM Models
+
+    func loadLLMModels(force: Bool = false) async {
+        guard !llmModelsLoading else { return }
+        guard force || !llmModelsLoaded else { return }
+
+        llmModelsLoading = true
+        llmModelsError = nil
+
+        let result = await DaemonAPI.get("/api/llm/models")
+
+        if result.ok, let dict = result.data as? [String: Any],
+           let items = dict["models"] as? [[String: Any]] {
+            llmModels = items.compactMap { Self.parseLLMModel($0) }
+        } else if !result.ok {
+            llmModelsError = "Failed to load LLM models — is the daemon running?"
+        } else {
+            llmModels = []
+        }
+        llmModelsLoaded = true
+        llmModelsLoading = false
+    }
+
+    private static func parseLLMModel(_ dict: [String: Any]) -> CachedLLMModel? {
+        guard let id = dict["id"] as? String else { return nil }
+        let types = dict["types"] as? [String] ?? []
+        let providers = dict["providers"] as? [String] ?? []
+        let families = dict["model_families"] as? [String] ?? []
+        let capabilities = dict["capabilities"] as? [String] ?? []
+        let maxContext = dict["max_context"] as? Int
+        let enabled = dict["enabled"] as? Bool ?? true
+        return CachedLLMModel(
+            id: id,
+            types: types,
+            providers: providers,
+            modelFamilies: families,
+            capabilities: capabilities,
+            maxContext: maxContext,
+            enabled: enabled
+        )
     }
 
     // MARK: - JSON Flattening (Settings)
