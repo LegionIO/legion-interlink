@@ -106,26 +106,17 @@ class ServiceManager: ObservableObject {
         return "/usr/local/bin/legionio"
     }
 
+    /// The known log file we write to when we launch the daemon ourselves.
+    /// This file is always valid to tail — even after the app is closed and reopened.
+    static var interlinkLogPath: String = {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let dir = "\(home)/.legionio/logs"
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        return "\(dir)/interlink.log"
+    }()
+
     private static func findLogPath(brew: String) -> String {
-        // Ask brew where it routes the daemon's stdout/stderr — works on both
-        // Apple Silicon (/opt/homebrew) and Intel (/usr/local) installs.
-        let process = Process()
-        let pipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: brew)
-        process.arguments = ["services", "info", "legionio", "--json"]
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-            process.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            if let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
-               let path = json.first?["log_path"] as? String, !path.isEmpty {
-                return path
-            }
-        } catch {}
-        // Fallback: standard homebrew log location
-        return "/opt/homebrew/var/log/legion/legion.log"
+        return Self.interlinkLogPath
     }
 
     init() {
@@ -134,7 +125,7 @@ class ServiceManager: ObservableObject {
         self.agenticMarkerPath = "\(home)/.legionio/.packs/agentic"
         self.resolvedBrewPath = Self.findBrewPath()
         self.resolvedLegionioPath = Self.findLegionioPath()
-        self.logPath = Self.findLogPath(brew: self.resolvedBrewPath)
+        self.logPath = Self.findLogPath(brew: "")
         checkSetupNeeded()
         startPolling()
     }
@@ -193,17 +184,22 @@ class ServiceManager: ObservableObject {
     // MARK: - Daemon Stdout Streaming
 
     /// Launch the legionio daemon, capturing its stdout+stderr and streaming
-    /// every line into `logContents` in real time.  The process reference is
-    /// kept alive so the pipe stays open for the daemon's lifetime.
+    /// every line into `logContents` in real time.  Output is also written to
+    /// `~/.legionio/logs/interlink.log` so the Logs tab can tail it after the
+    /// app is closed and reopened while the daemon continues running.
     private func launchDaemonWithStdoutCapture(executable: String, workingDirectory: String) async {
         // Tear down any previous process that might still be lingering.
         tearDownDaemonProcess()
 
+        let logFile = Self.interlinkLogPath
+
+        // Use `sh -c` to pipe daemon output through `tee -a` so we capture it
+        // via the pipe AND persist it to disk for future app launches.
         let process = Process()
         let pipe = Pipe()
 
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = ["start"]
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", "\(executable) start 2>&1 | tee -a \(logFile)"]
         process.currentDirectoryURL = URL(fileURLWithPath: workingDirectory)
         process.standardOutput = pipe
         process.standardError = pipe
@@ -354,6 +350,9 @@ class ServiceManager: ObservableObject {
         recalculateOverallStatus()
     }
 
+    /// Strong reference to the live `tail -f` process (used when tailing log file on reopen).
+    private var tailProcess: Process?
+
     func clearLogs() {
         logContents = ""
         let path = logPath
@@ -376,20 +375,85 @@ class ServiceManager: ObservableObject {
         }
     }
 
-    /// Start fast 1-second log polling (call when Logs tab is visible).
+    /// Start fast log streaming (call when Logs tab is visible).
+    /// If the daemon is being streamed live via pipe, this is a no-op.
+    /// Otherwise, it starts a `tail -f` process on the log file for live output.
     func startFastLogPolling() {
-        guard logTimer == nil else { return }
+        guard !isStreamingLogs else { return }
+        guard tailProcess == nil else { return }
+        // First show a snapshot of recent lines
         refreshLogs()
-        logTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            Task { @MainActor in self.refreshLogs() }
+        // Then start a live tail for new lines
+        let path = logPath
+        guard FileManager.default.fileExists(atPath: path) else {
+            // No log file yet — fall back to polling until one exists
+            logTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+                guard let self else { return }
+                Task { @MainActor in
+                    if FileManager.default.fileExists(atPath: path) {
+                        self.stopFastLogPolling()
+                        self.startFastLogPolling()
+                    }
+                }
+            }
+            return
+        }
+        startTailProcess(path: path)
+    }
+
+    /// Start a `tail -f` process on the given file, streaming new lines into logContents.
+    private func startTailProcess(path: String) {
+        let process = Process()
+        let pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/tail")
+        process.arguments = ["-f", "-n", "200", path]
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+
+        final class LineBuffer: @unchecked Sendable { var value = "" }
+        let lineBuffer = LineBuffer()
+
+        pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            guard !data.isEmpty, let self else { return }
+            guard let chunk = String(data: data, encoding: .utf8) else { return }
+            var lines = (lineBuffer.value + chunk).components(separatedBy: "\n")
+            lineBuffer.value = lines.removeLast()
+            guard !lines.isEmpty else { return }
+            let newText = lines.joined(separator: "\n") + "\n"
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.logContents += newText
+                let allLines = self.logContents.components(separatedBy: "\n")
+                if allLines.count > 4_100 {
+                    self.logContents = allLines.suffix(4_000).joined(separator: "\n")
+                }
+            }
+        }
+
+        process.terminationHandler = { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.tailProcess?.standardOutput.map { ($0 as? Pipe)?.fileHandleForReading.readabilityHandler = nil }
+                self.tailProcess = nil
+            }
+        }
+
+        do {
+            try process.run()
+            tailProcess = process
+        } catch {
+            logContents += "[interlink] failed to tail log file: \(error.localizedDescription)\n"
         }
     }
 
-    /// Stop fast log polling (call when Logs tab is hidden).
+    /// Stop fast log tailing (call when Logs tab is hidden).
     func stopFastLogPolling() {
         logTimer?.invalidate()
         logTimer = nil
+        tailProcess?.terminate()
+        tailProcess?.standardOutput.map { ($0 as? Pipe)?.fileHandleForReading.readabilityHandler = nil }
+        tailProcess = nil
     }
     // MARK: - Process Execution (for onboarding)
 
@@ -699,5 +763,7 @@ class ServiceManager: ObservableObject {
         timer?.invalidate()
         logTimer?.invalidate()
         daemonPipe?.fileHandleForReading.readabilityHandler = nil
+        tailProcess?.terminate()
+        tailProcess?.standardOutput.map { ($0 as? Pipe)?.fileHandleForReading.readabilityHandler = nil }
     }
 }

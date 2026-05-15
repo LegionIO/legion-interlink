@@ -738,7 +738,7 @@ struct LogsTab: View {
                     .font(.system(size: 10, weight: .bold, design: .monospaced))
                     .foregroundColor(TerminalTheme.textDim)
 
-                Text("— brew services log")
+                Text(manager.isStreamingLogs ? "— live pipe" : "— ~/.legionio/logs/interlink.log")
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundColor(TerminalTheme.textDim.opacity(0.5))
 
