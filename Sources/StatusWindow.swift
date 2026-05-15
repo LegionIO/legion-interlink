@@ -188,9 +188,9 @@ struct StatusWindowView: View {
     private static let tabServices = 0
     private static let tabLogs = 1
     private static let tabIdentity = 2
-    private static let tabExtensions = 3
-    private static let tabWorkers = 4
-    private static let tabLLM = 5
+    private static let tabLLM = 3
+    private static let tabExtensions = 4
+    private static let tabWorkers = 5
     private static let tabSettings = 6
 
     var body: some View {
@@ -352,9 +352,9 @@ struct StatusWindowView: View {
                 tabButton(title: "Services",   icon: "server.rack",           index: Self.tabServices)
                 tabButton(title: "Logs",       icon: "terminal",              index: Self.tabLogs)
                 tabButton(title: "Identity",   icon: "person.badge.key",      index: Self.tabIdentity)
+                tabButton(title: "LLM",        icon: "cpu",                   index: Self.tabLLM)
                 tabButton(title: "Extensions", icon: "puzzlepiece.extension", index: Self.tabExtensions)
                 tabButton(title: "Workers",    icon: "gearshape.2",           index: Self.tabWorkers)
-                tabButton(title: "LLM",        icon: "cpu",                   index: Self.tabLLM)
                 tabButton(title: "Settings",   icon: "gearshape",             index: Self.tabSettings)
             }
             .padding(.horizontal, 8)
