@@ -795,6 +795,8 @@ struct LogsTab: View {
             }
         }
         .background(TerminalTheme.bg)
+        .onAppear { manager.startFastLogPolling() }
+        .onDisappear { manager.stopFastLogPolling() }
     }
 }
 
