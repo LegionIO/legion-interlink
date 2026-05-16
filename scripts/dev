@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+#
+# Dev mode for Legion Interlink
+#
+# Usage:
+#   ./scripts/dev          Build debug + run
+#   ./scripts/dev release  Build release + run
+#   ./scripts/dev build    Build debug only
+#   ./scripts/dev clean    Clean build artifacts
+#
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+RESET='\033[0m'
+
+log()  { echo -e "${CYAN}▸${RESET} $*"; }
+ok()   { echo -e "${GREEN}✓${RESET} $*"; }
+warn() { echo -e "${YELLOW}⚠${RESET} $*"; }
+err()  { echo -e "${RED}✗${RESET} $*" >&2; }
+
+# Kill any running instance before launching a new one
+kill_existing() {
+  if pgrep -x LegionInterlink > /dev/null 2>&1; then
+    warn "Killing existing LegionInterlink process..."
+    pkill -x LegionInterlink || true
+    sleep 0.5
+  fi
+}
+
+cmd_build() {
+  local config="${1:-debug}"
+  log "Building ${BOLD}${config}${RESET}..."
+  if [ "$config" = "release" ]; then
+    swift build -c release 2>&1
+  else
+    swift build 2>&1
+  fi
+  ok "Build complete (${config})"
+}
+
+cmd_run() {
+  local config="${1:-debug}"
+  local binary
+
+  if [ "$config" = "release" ]; then
+    binary=".build/release/LegionInterlink"
+  else
+    binary=".build/debug/LegionInterlink"
+  fi
+
+  if [ ! -f "$binary" ]; then
+    cmd_build "$config"
+  fi
+
+  kill_existing
+  log "Launching ${BOLD}LegionInterlink${RESET} (${config})..."
+  echo -e "   ${CYAN}Menu bar icon should appear momentarily${RESET}"
+  echo -e "   ${CYAN}Press Ctrl+C to stop${RESET}"
+  echo ""
+  exec "$binary"
+}
+
+cmd_clean() {
+  log "Cleaning build artifacts..."
+  swift package clean 2>/dev/null || true
+  rm -rf .build
+  ok "Clean"
+}
+
+cmd_help() {
+  echo -e "${BOLD}Legion Interlink — Dev Helper${RESET}"
+  echo ""
+  echo "Usage: ./scripts/dev [command]"
+  echo ""
+  echo "Commands:"
+  echo "  (none)     Build debug and run"
+  echo "  release    Build release and run"
+  echo "  build      Build debug only"
+  echo "  clean      Remove .build directory"
+  echo "  help       Show this help"
+  echo ""
+  echo "Examples:"
+  echo "  ./scripts/dev              # quick iteration"
+  echo "  ./scripts/dev release      # test release build"
+  echo "  ./scripts/dev build        # compile without running"
+  echo "  ./scripts/dev clean        # fresh start"
+}
+
+case "${1:-}" in
+  release)  cmd_build release && cmd_run release ;;
+  build)    cmd_build debug ;;
+  clean)    cmd_clean ;;
+  help|-h|--help) cmd_help ;;
+  "")       cmd_build debug && cmd_run debug ;;
+  *)        err "Unknown command: $1"; cmd_help; exit 1 ;;
+esac

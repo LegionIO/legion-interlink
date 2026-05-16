@@ -1,101 +1,29 @@
 # Changelog
 
-## [1.1.25] - 2026-04-28
+## [2.0.0] - 2026-05-04
 
-### Fixed
-- LLM router settings now refresh live offering sources through the daemon provider inventory endpoint instead of the generic capabilities endpoint.
-
-## [1.1.24] - 2026-04-28
-
-### Fixed
-- Daemon LLM model discovery now accepts both legacy provider responses and native inventory responses from the routing redesign, and settings now uses router/offering wording while loading older mode values.
-
-## [1.1.23] - 2026-04-28
-
-### Fixed
-- Daemon SSE clients now recognize `thinking-delta` events from legion-llm reasoning streams without appending reasoning text to assistant chat responses.
-
-## [1.1.22] - 2026-04-27
-
-### Fixed
-- Markdown rendering now defensively unwraps serialized Anthropic Messages-API content blocks (`[{"type":"text","text":"..."}]`) at the renderer layer as a safety net for paths that bypass main-process normalization (#64)
-
-## [1.1.21] - 2026-04-27
+### Changed
+- **BREAKING**: Replaced the Electron desktop chat client with a native Swift macOS menu bar app. Legion Interlink is no longer a desktop chat UI — it is a menu bar utility that bootstraps, monitors, and controls the LegionIO daemon stack (legionio, redis, memcached, ollama).
+- Minimum macOS version raised from 10.13 to 13 (Ventura).
+- App size reduced from ~454MB (Electron + Chromium + Node) to ~592KB (native Swift binary).
 
 ### Added
-- Streaming response status now samples a stable verb from a spinner verb list for each new agent turn, with a Thinking fallback if the list is empty (#46)
+- Menu bar item with Legion icon and live status badge reflecting daemon health.
+- Native dashboard window with five tabs: Services (default), Logs, Extensions, Workers, Settings.
+- Service cards with start/stop controls, daemon component readiness indicators, and start-all / stop-all actions.
+- Live daemon log viewer with auto-scroll toggle and clear.
+- Search filtering across Extensions, Workers, and Settings tabs.
+- First-launch onboarding that auto-starts services and installs the agentic extension pack when `~/.legionio/.packs/agentic` is absent.
+- Health polling that updates service status within 5 seconds of state changes.
+- Launch-at-login toggle.
+- Universal binary builds (arm64 + x86_64) with code signing, notarization, and Homebrew Cask updates wired into release CI.
 
-## [1.1.20] - 2026-04-27
+### Removed
+- All Electron, React, TypeScript, and Node.js code (~70k lines, 245+ files), including the chat thread, sub-agent views, MCP integration UI, skills UI, memory/compaction settings UI, and trigger workflow components.
+- All npm dependencies (52 known vulnerabilities eliminated).
 
-### Fixed
-- Process execution, MCP stdio servers, and CLI tool binary checks now use a cached login-shell environment so tools installed by the user's shell profile are available from the desktop app (#48)
-
-## [1.1.19] - 2026-04-27
-
-### Added
-- Tool result rendering now classifies file, web, command, structured, and text results, summarizes detected paths, URLs, and TODOs, opens HTTP(S) URLs natively, adds per-tool icons, and can send TODO feedback back into the thread (#49)
-
-## [1.1.18] - 2026-04-27
-
-### Added
-- Tool results can now expose detected local file paths as clickable controls backed by a `shell:open-path` IPC handler that opens existing paths through the native shell (#43)
-
-## [1.1.17] - 2026-04-27
-
-### Added
-- Settings now includes a CLI Tools manager that shows built-in tools, checks binary availability, allows custom CLI tools, and enables or disables CLI tools without deleting built-in definitions (#37)
-
-## [1.1.16] - 2026-04-27
-
-### Fixed
-- Assistant response ingestion now unwraps text content blocks, including serialized `[{\"type\":\"text\",\"text\":\"...\"}]` payloads, before rendering so messages display as markdown instead of raw JSON (#28)
-
-## [1.1.15] - 2026-04-27
-
-### Fixed
-- Mission Control now labels persisted task rows as Tracked Tasks and adds a separate recent Activity card from daemon events so users can distinguish persisted jobs from live runner activity (#59)
-
-## [1.1.14] - 2026-04-27
-
-### Fixed
-- Mission Control worker health now reads daemon `lifecycle_state` before falling back to `status`, and counts paused workers as degraded instead of healthy (#54)
-
-## [1.1.13] - 2026-04-27
-
-### Fixed
-- Daemon settings GAIA card now derives mode from enabled/connected state and reads session TTL from `gaia.session.ttl` before the legacy flat fallback (#55)
-
-## [1.1.12] - 2026-04-27
-
-### Fixed
-- Chat responses now show a visible streaming/done/interrupted/error status pill and stale streams are recovered after 60 seconds without progress instead of leaving conversations marked running forever (#56)
-
-## [1.1.11] - 2026-04-27
-
-### Fixed
-- Mesh settings tab now checks loaded extensions and daemon mesh flags so it can distinguish missing `lex-mesh`, solo-node operation, and real disconnected states (#57)
-
-## [1.1.10] - 2026-04-27
-
-### Fixed
-- Skills settings tab now unwraps daemon `{ data, meta }` envelopes and guards against non-array skill responses so the panel no longer crashes on load (#58)
-
-## [1.1.9] - 2026-04-27
-
-### Fixed
-- Events settings tab now renders daemon event names from either `type` or `event` and builds useful detail text from flat event metadata when no nested `data` payload is present (#61)
-
-## [1.1.8] - 2026-04-27
-
-### Fixed
-- GAIA settings sessions card now reads `sessions_detail` before falling back to the legacy object-shaped `sessions`, so daemon responses with numeric `sessions` no longer render an empty value (#60)
-
-## [1.1.7] - 2026-04-24
-
-### Fixed
-- Manual model selection from dropdown now forwards the chosen model to the daemon; previously only static `runtime.daemon.model` overrides were sent, so selecting a different model in the UI had no effect
-- Daemon-sourced models (from `/v1/models`) now pass their model key through the passthrough config instead of sending an empty string
-- Added `mapProviderForDaemon()` to translate Interlink provider types (`amazon-bedrock`, `google`, `openai-compatible`) to daemon-side names (`bedrock`, `gemini`, auto-detect)
+### Migration
+Chat and AI assistant functionality has moved to **Kai** (`brew install --cask legionio/tap/kai`), which connects to the same legionio daemon stack via the `kai-plugin-legion` plugin. Legion Interlink now exists solely to manage the daemon services.
 
 ## [1.1.6] - 2026-04-22
 
