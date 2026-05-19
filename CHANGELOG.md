@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.1.0] - 2026-05-19
+
+### Added
+- **LLM Settings tab** — surfaces all `legion-llm` settings (defaults, routing, embedding, budget, tool trigger, prompt caching, context curation, conversation, RAG, escalation, arbitrage, debate, fleet, compliance, discovery, batch, scheduling, skills, pipeline/telemetry) with live editing.
+- **GAIA tab** — live status from `/api/gaia/status` plus editable settings (core, session, channels, output, notifications, knowledge, router).
+- **MCP tab** — accordion layout with Settings section (core, deferred loading, dynamic tools, self-generate/codegen) and Servers section listing configured MCP servers with transport/command info.
+- **Providers tab** — accordion-style provider instances that expand to show per-provider models fetched from `/api/llm/providers/:name/models`.
+- **Updates tab** — checks `brew outdated` for legionio and `legion-gem outdated` for legion-*/lex-* gems; per-item and "Update All" buttons; background check every 30 minutes with macOS notifications for outdated brew/core libraries; auto-updates lex-* gems (safe — old versions kept).
+- `SettingsFile` utility — writes settings to `~/.legionio/settings/<category>.json` on save (llm.json, gaia.json, mcp.json) in addition to hot-reloading via daemon PUT endpoint.
+- `CLAUDE.md` — developer reference for the Swift codebase.
+
+### Changed
+- Renamed former "LLM" tab to "Providers" (accordion provider instances with models).
+- Tab bar expanded: Services, Logs, Identity, LLM, Providers, GAIA, MCP, Extensions, Workers, Updates, Settings.
+- `README.md` rewritten to reflect current Swift process manager architecture.
+- `DaemonCache` gains per-provider model loading (`loadProviderModels`, `clearProviderModels`).
+
 ## [2.0.0] - 2026-05-04
 
 ### Changed
