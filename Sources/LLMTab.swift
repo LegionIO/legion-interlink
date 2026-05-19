@@ -163,40 +163,46 @@ struct IdentityTab: View {
     }
 }
 
-// MARK: - Combined LLM Tab (Providers + Models)
+// MARK: - LLM Providers Tab (Accordion Providers → Models)
 
-struct LLMTab: View {
+struct LLMProvidersTab: View {
     @StateObject private var cache = DaemonCache.shared
-    @State private var section = LLMSection.providers
     @State private var searchText = ""
-
-    enum LLMSection: String, CaseIterable {
-        case providers = "Providers"
-        case models    = "Models"
-    }
+    @State private var expandedProviders: Set<String> = []
 
     var body: some View {
         VStack(spacing: 0) {
             header
 
-            Group {
-                switch section {
-                case .providers: providersBody
-                case .models:    modelsBody
+            if cache.llmProvidersLoading && !cache.llmProvidersLoaded {
+                LLMTabHelpers.loadingView
+            } else if let error = cache.llmProvidersError {
+                LLMTabHelpers.errorView(error) { Task { await cache.loadLLMProviders(force: true) } }
+            } else if filteredProviders.isEmpty {
+                LLMTabHelpers.emptyView(icon: "cpu",
+                                        message: "No providers found",
+                                        hint: "LLM providers will appear when the daemon is running")
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 8) {
+                        ForEach(filteredProviders) { provider in
+                            ProviderAccordionCard(
+                                provider: provider,
+                                isExpanded: expandedProviders.contains(provider.id),
+                                onToggle: { toggleExpanded(provider.id) }
+                            )
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .transition(.opacity)
-            .animation(.easeInOut(duration: 0.12), value: section)
         }
         .background(TerminalTheme.bg)
-        .task {
-            await cache.loadLLMProviders()
-            await cache.loadLLMModels()
-        }
+        .task { await cache.loadLLMProviders() }
     }
 
-    // MARK: - Shared header with section picker
+    // MARK: - Header
 
     private var header: some View {
         HStack(spacing: 12) {
@@ -208,30 +214,19 @@ struct LLMTab: View {
                 .font(.system(size: 10, weight: .bold, design: .monospaced))
                 .foregroundColor(TerminalTheme.textDim)
 
-            // Section picker
-            HStack(spacing: 0) {
-                ForEach(LLMSection.allCases, id: \.self) { s in
-                    sectionChip(s)
-                }
-            }
-            .background(TerminalTheme.cardBg)
-            .overlay(RoundedRectangle(cornerRadius: 4).stroke(TerminalTheme.border, lineWidth: 1))
-            .cornerRadius(4)
-
-            // Count badge for active section
-            let count = section == .providers ? cache.llmProviders.count : cache.llmModels.count
-            if count > 0 {
-                LLMTabHelpers.countBadge(count)
+            if !cache.llmProviders.isEmpty {
+                LLMTabHelpers.countBadge(cache.llmProviders.count)
             }
 
             Spacer()
 
             TerminalSearchBox(text: $searchText)
 
-            if section == .providers {
-                LLMTabHelpers.refreshButton { Task { await cache.loadLLMProviders(force: true) } }
-            } else {
-                LLMTabHelpers.refreshButton { Task { await cache.loadLLMModels(force: true) } }
+            LLMTabHelpers.refreshButton {
+                Task {
+                    await cache.loadLLMProviders(force: true)
+                    cache.clearProviderModels()
+                }
             }
         }
         .padding(.horizontal, 16)
@@ -239,47 +234,6 @@ struct LLMTab: View {
         .frame(height: 36)
         .background(TerminalTheme.surfaceBg)
         .overlay(Rectangle().fill(TerminalTheme.border).frame(height: 1), alignment: .bottom)
-    }
-
-    private func sectionChip(_ s: LLMSection) -> some View {
-        let active = section == s
-        return Button(action: { withAnimation(.easeInOut(duration: 0.12)) { section = s } }) {
-            Text(s.rawValue)
-                .font(.system(size: 10, weight: active ? .semibold : .regular, design: .monospaced))
-                .foregroundColor(active ? TerminalTheme.bg : TerminalTheme.textDim)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(active ? TerminalTheme.accent : Color.clear)
-                .cornerRadius(3)
-        }
-        .buttonStyle(.plain)
-        .pointerCursor()
-    }
-
-    // MARK: - Providers section
-
-    private var providersBody: some View {
-        Group {
-            if cache.llmProvidersLoading && !cache.llmProvidersLoaded {
-                LLMTabHelpers.loadingView
-            } else if let error = cache.llmProvidersError {
-                LLMTabHelpers.errorView(error) { Task { await cache.loadLLMProviders(force: true) } }
-            } else if filteredProviders.isEmpty {
-                LLMTabHelpers.emptyView(icon: "cloud.fill",
-                                        message: "No providers found",
-                                        hint: "LLM providers will appear when the daemon is running")
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: 8) {
-                        ForEach(filteredProviders) { provider in
-                            providerCard(provider)
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                }
-            }
-        }
     }
 
     private var filteredProviders: [CachedLLMProvider] {
@@ -292,14 +246,61 @@ struct LLMTab: View {
         }
     }
 
-    private func providerCard(_ provider: CachedLLMProvider) -> some View {
+    private func toggleExpanded(_ id: String) {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            if expandedProviders.contains(id) {
+                expandedProviders.remove(id)
+            } else {
+                expandedProviders.insert(id)
+            }
+        }
+    }
+}
+
+// MARK: - Provider Accordion Card
+
+private struct ProviderAccordionCard: View {
+    let provider: CachedLLMProvider
+    let isExpanded: Bool
+    let onToggle: () -> Void
+
+    @StateObject private var cache = DaemonCache.shared
+
+    private var stateOk: Bool { provider.circuitState == "closed" }
+    private var stateColor: Color { stateOk ? TerminalTheme.green : TerminalTheme.red }
+
+    private var models: [CachedLLMModel] {
+        cache.providerModels[provider.provider] ?? []
+    }
+    private var modelsLoading: Bool {
+        cache.providerModelsLoading[provider.provider] ?? false
+    }
+
+    var body: some View {
         HoverCard {
+            VStack(spacing: 0) {
+                providerHeader
+                if isExpanded {
+                    modelsSection
+                }
+            }
+        }
+        .onChange(of: isExpanded) { expanded in
+            if expanded && cache.providerModels[provider.provider] == nil {
+                Task { await cache.loadProviderModels(provider.provider) }
+            }
+        }
+    }
+
+    // MARK: - Provider Header (clickable)
+
+    private var providerHeader: some View {
+        Button(action: onToggle) {
             HStack(spacing: 10) {
-                let stateOk = provider.circuitState == "closed"
                 Circle()
-                    .fill(stateOk ? TerminalTheme.green : TerminalTheme.red)
+                    .fill(stateColor)
                     .frame(width: 7, height: 7)
-                    .shadow(color: (stateOk ? TerminalTheme.green : TerminalTheme.red).opacity(0.5), radius: 3)
+                    .shadow(color: stateColor.opacity(0.5), radius: 3)
 
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
@@ -329,126 +330,108 @@ struct LLMTab: View {
                     LLMTabHelpers.tierBadge(provider.tier)
                     Text(provider.circuitState)
                         .font(.system(size: 9, design: .monospaced))
-                        .foregroundColor(stateOk ? TerminalTheme.green : TerminalTheme.red)
+                        .foregroundColor(stateColor)
                 }
+
+                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundColor(TerminalTheme.textDim.opacity(0.5))
             }
             .padding(12)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .pointerCursor()
     }
 
-    // MARK: - Models section
+    // MARK: - Models Section (accordion body)
 
-    private var filteredModels: [CachedLLMModel] {
-        guard !searchText.isEmpty else { return cache.llmModels }
-        let q = searchText.lowercased()
-        return cache.llmModels.filter {
-            $0.id.lowercased().contains(q) ||
-            $0.providers.joined(separator: " ").lowercased().contains(q) ||
-            $0.modelFamilies.joined(separator: " ").lowercased().contains(q)
-        }
-    }
+    private var modelsSection: some View {
+        VStack(spacing: 0) {
+            Rectangle()
+                .fill(TerminalTheme.border)
+                .frame(height: 1)
+                .padding(.horizontal, 12)
 
-    private var modelsBody: some View {
-        Group {
-            if cache.llmModelsLoading && !cache.llmModelsLoaded {
-                LLMTabHelpers.loadingView
-            } else if let error = cache.llmModelsError {
-                LLMTabHelpers.errorView(error) { Task { await cache.loadLLMModels(force: true) } }
-            } else if filteredModels.isEmpty {
-                LLMTabHelpers.emptyView(icon: "cpu",
-                                        message: "No models found",
-                                        hint: "LLM models will appear when the daemon is running")
+            if modelsLoading {
+                HStack {
+                    Spacer()
+                    ProgressView()
+                        .controlSize(.mini)
+                        .scaleEffect(0.7)
+                    Text("loading models...")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(TerminalTheme.textDim)
+                    Spacer()
+                }
+                .padding(.vertical, 10)
+            } else if models.isEmpty {
+                Text("no models registered")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(TerminalTheme.textDim.opacity(0.5))
+                    .padding(.vertical, 10)
             } else {
-                ScrollView {
-                    LazyVStack(spacing: 6) {
-                        ForEach(filteredModels) { model in
-                            modelCard(model)
-                        }
+                VStack(spacing: 4) {
+                    ForEach(models) { model in
+                        modelRow(model)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
                 }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
             }
         }
     }
 
-    private func modelCard(_ model: CachedLLMModel) -> some View {
-        HoverCard {
-            HStack(spacing: 10) {
-                // Type badge(s)
-                VStack(spacing: 2) {
-                    ForEach(model.types, id: \.self) { t in
-                        let isInfer = t == "inference"
-                        Text(isInfer ? "INF" : "EMB")
-                            .font(.system(size: 7, weight: .bold, design: .monospaced))
-                            .foregroundColor(isInfer ? TerminalTheme.accent : TerminalTheme.yellow)
-                            .frame(width: 28)
-                            .padding(.vertical, 2)
-                            .background(isInfer
-                                ? TerminalTheme.accent.opacity(0.12)
-                                : TerminalTheme.yellow.opacity(0.12))
-                            .cornerRadius(2)
-                    }
+    private func modelRow(_ model: CachedLLMModel) -> some View {
+        HStack(spacing: 8) {
+            // Type badge(s)
+            HStack(spacing: 2) {
+                ForEach(model.types, id: \.self) { t in
+                    let isInfer = t == "inference"
+                    Text(isInfer ? "INF" : "EMB")
+                        .font(.system(size: 7, weight: .bold, design: .monospaced))
+                        .foregroundColor(isInfer ? TerminalTheme.accent : TerminalTheme.yellow)
+                        .frame(width: 26)
+                        .padding(.vertical, 2)
+                        .background(isInfer
+                            ? TerminalTheme.accent.opacity(0.12)
+                            : TerminalTheme.yellow.opacity(0.12))
+                        .cornerRadius(2)
                 }
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(model.id)
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
-                        .foregroundColor(TerminalTheme.text)
-                        .lineLimit(1)
-
-                    HStack(spacing: 5) {
-                        ForEach(model.providers, id: \.self) { p in
-                            let pColor = providerColor(p)
-                            Text(p)
-                                .font(.system(size: 9, design: .monospaced))
-                                .foregroundColor(pColor)
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 1)
-                                .background(pColor.opacity(0.1))
-                                .cornerRadius(3)
-                        }
-
-                        if let ctx = model.maxContext {
-                            Text(formatContext(ctx))
-                                .font(.system(size: 9, design: .monospaced))
-                                .foregroundColor(TerminalTheme.textDim)
-                        }
-                    }
-                }
-
-                Spacer()
-
-                if !model.capabilities.isEmpty {
-                    HStack(spacing: 3) {
-                        ForEach(model.capabilities.prefix(3), id: \.self) { cap in
-                            LLMTabHelpers.capBadge(cap)
-                        }
-                    }
-                }
-
-                Circle()
-                    .fill(model.enabled ? TerminalTheme.green : TerminalTheme.red)
-                    .frame(width: 6, height: 6)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+
+            Text(model.id)
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundColor(TerminalTheme.text)
+                .lineLimit(1)
+
+            Spacer()
+
+            if let ctx = model.maxContext {
+                Text(Self.formatContext(ctx))
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(TerminalTheme.textDim)
+            }
+
+            if !model.capabilities.isEmpty {
+                HStack(spacing: 2) {
+                    ForEach(model.capabilities.prefix(2), id: \.self) { cap in
+                        LLMTabHelpers.capBadge(cap)
+                    }
+                }
+            }
+
+            Circle()
+                .fill(model.enabled ? TerminalTheme.green : TerminalTheme.red)
+                .frame(width: 5, height: 5)
         }
+        .padding(.vertical, 4)
+        .padding(.horizontal, 4)
+        .background(TerminalTheme.bg.opacity(0.5))
+        .cornerRadius(4)
     }
 
-    private func providerColor(_ provider: String) -> Color {
-        switch provider {
-        case "anthropic": return Color(red: 0.85, green: 0.60, blue: 0.35)
-        case "bedrock":   return Color(red: 0.90, green: 0.55, blue: 0.20)
-        case "ollama":    return Color(red: 0.50, green: 0.75, blue: 0.55)
-        case "vllm":      return Color(red: 0.55, green: 0.65, blue: 0.90)
-        case "openai":    return Color(red: 0.30, green: 0.80, blue: 0.60)
-        case "gemini":    return Color(red: 0.65, green: 0.45, blue: 0.90)
-        default:          return TerminalTheme.textDim
-        }
-    }
-
-    private func formatContext(_ n: Int) -> String {
+    private static func formatContext(_ n: Int) -> String {
         if n >= 1_000_000 { return "\(n / 1_000_000)M ctx" }
         if n >= 1_000     { return "\(n / 1_000)k ctx" }
         return "\(n) ctx"

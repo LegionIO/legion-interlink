@@ -124,6 +124,10 @@ final class DaemonCache: ObservableObject {
     @Published var llmModelsLoading = false
     @Published var llmModelsError: String?
 
+    // Per-provider models (accordion)
+    @Published var providerModels: [String: [CachedLLMModel]] = [:]
+    @Published var providerModelsLoading: [String: Bool] = [:]
+
     private static let settingsDir: String = {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         return "\(home)/.legionio/settings"
@@ -409,6 +413,28 @@ final class DaemonCache: ObservableObject {
             maxContext: maxContext,
             enabled: enabled
         )
+    }
+
+    // MARK: - Per-Provider Models (Accordion)
+
+    func loadProviderModels(_ providerName: String) async {
+        guard providerModelsLoading[providerName] != true else { return }
+        providerModelsLoading[providerName] = true
+
+        let result = await DaemonAPI.get("/api/llm/providers/\(providerName)/models")
+
+        if result.ok, let dict = result.data as? [String: Any],
+           let items = dict["models"] as? [[String: Any]] {
+            providerModels[providerName] = items.compactMap { Self.parseLLMModel($0) }
+        } else {
+            providerModels[providerName] = []
+        }
+        providerModelsLoading[providerName] = false
+    }
+
+    func clearProviderModels() {
+        providerModels = [:]
+        providerModelsLoading = [:]
     }
 
     // MARK: - JSON Flattening (Settings)

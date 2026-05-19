@@ -189,9 +189,13 @@ struct StatusWindowView: View {
     private static let tabLogs = 1
     private static let tabIdentity = 2
     private static let tabLLM = 3
-    private static let tabExtensions = 4
-    private static let tabWorkers = 5
-    private static let tabSettings = 6
+    private static let tabProviders = 4
+    private static let tabGaia = 5
+    private static let tabMCP = 6
+    private static let tabExtensions = 7
+    private static let tabWorkers = 8
+    private static let tabUpdates = 9
+    private static let tabSettings = 10
 
     var body: some View {
         VStack(spacing: 0) {
@@ -207,9 +211,13 @@ struct StatusWindowView: View {
                 case Self.tabServices:   ServicesTab()
                 case Self.tabLogs:       LogsTab()
                 case Self.tabIdentity:   IdentityTab()
+                case Self.tabLLM:        LLMSettingsTab()
+                case Self.tabProviders:  LLMProvidersTab()
+                case Self.tabGaia:       GaiaTab()
+                case Self.tabMCP:        MCPTab()
                 case Self.tabExtensions: ExtensionsTab()
                 case Self.tabWorkers:    WorkersTab()
-                case Self.tabLLM:        LLMTab()
+                case Self.tabUpdates:    UpdatesTab()
                 case Self.tabSettings:   DaemonSettingsTab()
                 default:                 ServicesTab()
                 }
@@ -352,9 +360,13 @@ struct StatusWindowView: View {
                 tabButton(title: "Services",   icon: "server.rack",           index: Self.tabServices)
                 tabButton(title: "Logs",       icon: "terminal",              index: Self.tabLogs)
                 tabButton(title: "Identity",   icon: "person.badge.key",      index: Self.tabIdentity)
-                tabButton(title: "LLM",        icon: "cpu",                   index: Self.tabLLM)
+                tabButton(title: "LLM",        icon: "brain",                 index: Self.tabLLM)
+                tabButton(title: "Providers",  icon: "cpu",                   index: Self.tabProviders)
+                tabButton(title: "GAIA",       icon: "bubble.left.and.bubble.right", index: Self.tabGaia)
+                tabButton(title: "MCP",        icon: "link.circle",           index: Self.tabMCP)
                 tabButton(title: "Extensions", icon: "puzzlepiece.extension", index: Self.tabExtensions)
                 tabButton(title: "Workers",    icon: "gearshape.2",           index: Self.tabWorkers)
+                tabButton(title: "Updates",    icon: "arrow.triangle.2.circlepath", index: Self.tabUpdates)
                 tabButton(title: "Settings",   icon: "gearshape",             index: Self.tabSettings)
             }
             .padding(.horizontal, 8)
