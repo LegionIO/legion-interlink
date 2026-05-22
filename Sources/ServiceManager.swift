@@ -157,9 +157,14 @@ class ServiceManager: ObservableObject {
         suppressPolling = true
         let brew = resolvedBrewPath
         let name = service.brewName
+        let healthURL = daemonHealthURL
         Task.detached {
             Self.runProcess(brew, arguments: ["services", "start", name])
             await Self.waitForServiceReady(service: service, brew: brew, target: true, timeout: 60)
+            // For legionio, also wait for the HTTP health endpoint to confirm ready
+            if service == .legionio {
+                await Self.waitForDaemonReady(url: healthURL, timeout: 120)
+            }
             await MainActor.run {
                 self.updateServiceStatus(service, .running)
                 self.suppressPolling = false
@@ -197,9 +202,14 @@ class ServiceManager: ObservableObject {
         suppressPolling = true
         let brew = resolvedBrewPath
         let name = service.brewName
+        let healthURL = daemonHealthURL
         Task.detached {
             Self.runProcess(brew, arguments: ["services", "restart", name])
             await Self.waitForServiceReady(service: service, brew: brew, target: true, timeout: 60)
+            // For legionio, also wait for the HTTP health endpoint to confirm ready
+            if service == .legionio {
+                await Self.waitForDaemonReady(url: healthURL, timeout: 120)
+            }
             await MainActor.run {
                 self.updateServiceStatus(service, .running)
                 self.suppressPolling = false
@@ -230,10 +240,11 @@ class ServiceManager: ObservableObject {
         updateServiceIfStable(.redis, redis.running ? .running : .stopped, pid: redis.pid)
         updateServiceIfStable(.memcached, memcached.running ? .running : .stopped, pid: memcached.pid)
         updateServiceIfStable(.ollama, ollama.running ? .running : .stopped, pid: ollama.pid)
-        updateServiceIfStable(.legionio, legionio.running ? .running : .stopped, pid: legionio.pid)
 
-        // Update daemon readiness from HTTP health (component-level detail)
+        // LegionIO requires both brew service running AND /api/ready responding
         daemonReadiness = daemonHealth.readiness
+        let daemonOnline = legionio.running && daemonHealth.responding
+        updateServiceIfStable(.legionio, daemonOnline ? .running : .stopped, pid: legionio.pid)
 
         lastChecked = Date()
         recalculateOverallStatus()
@@ -426,6 +437,18 @@ class ServiceManager: ObservableObject {
 
             let result = await checkBrewService(brew: brew, name: service.brewName)
             if result.running == target {
+                return
+            }
+        }
+    }
+
+    /// Poll the daemon HTTP health endpoint until it reports `ready: true`, up to `timeout` seconds.
+    private nonisolated static func waitForDaemonReady(url: URL, timeout: Int) async {
+        let interval: UInt64 = 1_000_000_000  // 1 second
+        for _ in 0..<timeout {
+            try? await Task.sleep(nanoseconds: interval)
+            let result = await checkDaemonHealth(url: url)
+            if result.responding {
                 return
             }
         }
