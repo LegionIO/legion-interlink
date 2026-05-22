@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.2.1] - 2026-05-22
+
+### Fixed
+- **Service status in .app bundle** — Redis, Memcached, and Ollama now correctly show as running when the app is launched from the menu bar (brew-installed). macOS launches `.app` bundles with a bare `PATH` that omits `/opt/homebrew/bin`, causing `brew services info` to fail silently. All child processes (service checks, start/stop, daemon launch) now receive an explicit `PATH` that includes both Apple Silicon (`/opt/homebrew`) and Intel (`/usr/local`) Homebrew prefixes.
+- **Log capture after app reopen** — Logs tab now streams live output after closing and reopening the app while the daemon continues running. The daemon is launched via `tee -a ~/.legionio/logs/interlink.log` so output is persisted to disk. On reopen, the Logs tab starts a `tail -f` process on that file for real-time streaming instead of periodic polling.
+
 ## [2.1.0] - 2026-05-19
 
 ### Added
