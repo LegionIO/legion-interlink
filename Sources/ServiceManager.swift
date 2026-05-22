@@ -295,6 +295,27 @@ class ServiceManager: ObservableObject {
         }
     }
 
+    func restartService(_ service: ServiceName) {
+        if service == .legionio {
+            restartDaemon()
+            return
+        }
+        updateServiceStatus(service, .stopping)
+        suppressPolling = true
+        let brew = resolvedBrewPath
+        let name = service.brewName
+        let healthURL = daemonHealthURL
+        Task.detached {
+            Self.runProcess(brew, arguments: ["services", "restart", name])
+            await Self.waitForServiceReady(service: service, brew: brew, healthURL: healthURL, target: true, timeout: 60)
+            await MainActor.run {
+                self.suppressPolling = false
+                self.recalculateOverallStatus()
+            }
+            await self.checkAllServices()
+        }
+    }
+
     func restartDaemon() {
         updateServiceStatus(.legionio, .stopping)
         tearDownDaemonProcess()

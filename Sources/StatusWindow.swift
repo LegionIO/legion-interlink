@@ -609,10 +609,13 @@ struct ServicesTab: View {
 
                 Spacer()
 
-                // Control button
+                // Control buttons: start / restart / stop
                 if service.status == .stopping || service.status == .starting {
                     // No button while transitioning
                 } else if service.status == .running {
+                    terminalButton("restart", color: TerminalTheme.yellow) {
+                        manager.restartService(service.name)
+                    }
                     terminalButton("stop", color: TerminalTheme.red) {
                         manager.stopService(service.name)
                     }
