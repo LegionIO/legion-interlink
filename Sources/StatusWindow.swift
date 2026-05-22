@@ -185,6 +185,23 @@ struct StatusWindowView: View {
     @State private var selectedTab = 0
     @State private var hasAppeared = false
 
+    /// Fallback version string read from the VERSION file at compile time.
+    /// The .app bundle will override this via CFBundleShortVersionString.
+    private let appVersion: String = {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        // Try repo-relative VERSION file first (dev builds)
+        let candidates = [
+            Bundle.main.bundlePath + "/Contents/Resources/VERSION",
+            FileManager.default.currentDirectoryPath + "/VERSION",
+        ]
+        for path in candidates {
+            if let v = try? String(contentsOfFile: path, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines), !v.isEmpty {
+                return v
+            }
+        }
+        return "2.2.1"
+    }()
+
     private static let tabServices = 0
     private static let tabLogs = 1
     private static let tabIdentity = 2
@@ -317,6 +334,10 @@ struct StatusWindowView: View {
             statusPill
 
             Spacer()
+
+            Text("v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? appVersion)")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundColor(TerminalTheme.textDim.opacity(0.6))
 
             if let lastChecked = manager.lastChecked {
                 Text(lastChecked, style: .time)
