@@ -644,6 +644,12 @@ class ServiceManager: ObservableObject {
         let current = env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
         env["PATH"] = "\(extras):\(current)"
         env["HOME"] = FileManager.default.homeDirectoryForCurrentUser.path
+        // Prevent brew from fetching the formula API over the network — the .app
+        // sandbox has no DNS, so brew services info would fail with a curl error
+        // before returning any JSON.
+        env["HOMEBREW_NO_AUTO_UPDATE"] = "1"
+        env["HOMEBREW_NO_ANALYTICS"] = "1"
+        env["HOMEBREW_NO_INSTALL_FROM_API"] = "1"
         return env
     }
 
