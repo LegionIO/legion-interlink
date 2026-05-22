@@ -201,6 +201,7 @@ class ServiceManager: ObservableObject {
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = ["-c", "\(executable) start 2>&1 | tee -a \(logFile)"]
         process.currentDirectoryURL = URL(fileURLWithPath: workingDirectory)
+        process.environment = Self.brewEnvironment
         process.standardOutput = pipe
         process.standardError = pipe
 
@@ -518,6 +519,7 @@ class ServiceManager: ObservableObject {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
+        process.environment = brewEnvironment
         if let workingDirectory {
             process.currentDirectoryURL = URL(fileURLWithPath: workingDirectory)
         }
@@ -533,6 +535,7 @@ class ServiceManager: ObservableObject {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
+        process.environment = brewEnvironment
         if let workingDirectory {
             process.currentDirectoryURL = URL(fileURLWithPath: workingDirectory)
         }
@@ -611,12 +614,25 @@ class ServiceManager: ObservableObject {
         }
     }
 
+    /// A minimal environment suitable for running brew and legionio from within
+    /// a .app bundle, which launches with a bare PATH that omits /opt/homebrew/bin.
+    private nonisolated static var brewEnvironment: [String: String] {
+        var env = ProcessInfo.processInfo.environment
+        // Ensure both Apple Silicon and Intel Homebrew prefixes are in PATH.
+        let extras = "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin"
+        let current = env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+        env["PATH"] = "\(extras):\(current)"
+        env["HOME"] = FileManager.default.homeDirectoryForCurrentUser.path
+        return env
+    }
+
     /// Check a brew service status. Runs entirely off main thread.
     private nonisolated static func checkBrewService(brew: String, name: String) async -> (running: Bool, pid: Int?) {
         let process = Process()
         let pipe = Pipe()
         process.executableURL = URL(fileURLWithPath: brew)
         process.arguments = ["services", "info", name, "--json"]
+        process.environment = brewEnvironment
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
 
