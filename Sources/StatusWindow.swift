@@ -338,12 +338,6 @@ struct StatusWindowView: View {
             Text("v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? appVersion)")
                 .font(.system(size: 9, design: .monospaced))
                 .foregroundColor(TerminalTheme.textDim.opacity(0.6))
-
-            if let lastChecked = manager.lastChecked {
-                Text(lastChecked, style: .time)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(TerminalTheme.textDim)
-            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
