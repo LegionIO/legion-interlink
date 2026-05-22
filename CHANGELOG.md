@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.2.4] - 2026-05-22
+
+### Fixed
+- **Restart stuck on "Stopping..."** — `restartService` now correctly transitions to `.running` after `brew services restart` completes.
+- **Service card button alignment** — Restart/stop buttons on Redis, Memcached, and Ollama cards now align with the LegionIO Daemon card.
+
+### Changed
+- **Wait for `/api/ready` before online** — The daemon is only shown as "running" after both `brew services` reports it running AND the HTTP health endpoint confirms ready (120s timeout).
+- **Elapsed seconds counter** — Starting/stopping states now show a live seconds counter (e.g. `starting... 5s`).
+
 ## [2.2.3] - 2026-05-22
 
 ### Changed
