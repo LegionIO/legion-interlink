@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.2.3] - 2026-05-22
+
+### Changed
+- **Daemon lifecycle via brew services** — Start, stop, and restart for the LegionIO daemon now use `brew services` (same as redis/memcached/ollama) instead of launching the process directly. Simpler, more consistent, and survives app restarts.
+- **Status from brew services** — Online/offline status for the daemon is now determined by `brew services info legionio --json` rather than the HTTP health endpoint.
+- **Logs tail brew log** — Logs tab tails the brew service log (`/opt/homebrew/var/log/legion/legion.log`) detected dynamically at init, instead of the custom interlink.log written via `tee`.
+
+### Removed
+- Direct daemon process management (stdout piping, `tee` log capture, `legionio start`/`stop` CLI calls).
+
 ## [2.2.2] - 2026-05-22
 
 ### Fixed
