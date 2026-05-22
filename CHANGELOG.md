@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.2.2] - 2026-05-22
+
+### Fixed
+- **Service status in .app bundle (redux)** — `HOMEBREW_NO_INSTALL_FROM_API=1` added to the brew child process environment. The `.app` sandbox blocks DNS, causing brew to fail while trying to refresh its formula API cache from `formulae.brew.sh` before returning any service status JSON. This flag tells brew to use local taps and skip all network fetches entirely. Confirmed fix with `env -i` simulation matching the launchd environment.
+- **Updates tab crash** — `UNUserNotificationCenter.current()` now guarded with a `Bundle.main.bundleIdentifier != nil` check so dev builds (plain binary, no bundle) skip notifications silently instead of crashing.
+- **Restart buttons** — All service cards (including LegionIO Daemon) now show a yellow **restart** button alongside **stop** when running.
+- **Version number in title bar** — App version (`v2.2.x`) displayed top-right; clock removed.
+
 ## [2.2.1] - 2026-05-22
 
 ### Fixed
