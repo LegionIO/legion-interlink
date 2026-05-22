@@ -201,10 +201,10 @@ class ServiceManager: ObservableObject {
             Self.runProcess(brew, arguments: ["services", "restart", name])
             await Self.waitForServiceReady(service: service, brew: brew, target: true, timeout: 60)
             await MainActor.run {
+                self.updateServiceStatus(service, .running)
                 self.suppressPolling = false
                 self.recalculateOverallStatus()
             }
-            await self.checkAllServices()
         }
     }
 
