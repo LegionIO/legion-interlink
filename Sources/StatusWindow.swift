@@ -607,18 +607,20 @@ struct ServicesTab: View {
                 Spacer()
 
                 // Control buttons: start / restart / stop
-                if service.status == .stopping || service.status == .starting {
-                    // No button while transitioning
-                } else if service.status == .running {
-                    terminalButton("restart", color: TerminalTheme.yellow) {
-                        manager.restartService(service.name)
-                    }
-                    terminalButton("stop", color: TerminalTheme.red) {
-                        manager.stopService(service.name)
-                    }
-                } else {
-                    terminalButton("start", color: TerminalTheme.green) {
-                        manager.startService(service.name)
+                HStack(spacing: 6) {
+                    if service.status == .stopping || service.status == .starting {
+                        // No button while transitioning
+                    } else if service.status == .running {
+                        terminalButton("restart", color: TerminalTheme.yellow) {
+                            manager.restartService(service.name)
+                        }
+                        terminalButton("stop", color: TerminalTheme.red) {
+                            manager.stopService(service.name)
+                        }
+                    } else {
+                        terminalButton("start", color: TerminalTheme.green) {
+                            manager.startService(service.name)
+                        }
                     }
                 }
             }
