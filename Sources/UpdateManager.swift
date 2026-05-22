@@ -55,6 +55,10 @@ class UpdateManager: ObservableObject {
     // MARK: - Notifications
 
     private nonisolated func sendNotification(title: String, body: String) {
+        // UNUserNotificationCenter requires a proper .app bundle with a bundle ID.
+        // Plain binary dev builds have no bundle — skip silently to avoid a hard crash.
+        guard Bundle.main.bundleIdentifier != nil else { return }
+
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
@@ -64,8 +68,6 @@ class UpdateManager: ObservableObject {
             content: content,
             trigger: nil
         )
-        // Request permission on the fly the first time we try to send a notification.
-        // Must happen on main thread; bail silently if not granted or not available.
         DispatchQueue.main.async {
             UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge]) { granted, _ in
                 guard granted else { return }
