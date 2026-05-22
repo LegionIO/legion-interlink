@@ -70,27 +70,19 @@ class ServiceManager: ObservableObject {
     @Published var logContents: String = ""
     @Published var errorLogContents: String = ""
     @Published var setupNeeded: Bool = false
-    /// True while the daemon process stdout is being streamed live into logContents.
-    @Published var isStreamingLogs: Bool = false
 
     /// When true, background polling skips checkAllServices to avoid overwriting transition states.
     private var suppressPolling = false
 
     nonisolated static let daemonPort = 4567
     private let daemonHealthURL = URL(string: "http://localhost:\(daemonPort)/api/ready")!
-    private let legionHome: String
     private let logPath: String
     private let agenticMarkerPath: String
     private var timer: Timer?
     private var logTimer: Timer?
 
-    /// Strong references to the live daemon process and its output pipe.
-    private var daemonProcess: Process?
-    private var daemonPipe: Pipe?
-
     /// Resolved once at init — no repeated filesystem checks.
     private let resolvedBrewPath: String
-    private let resolvedLegionioPath: String
 
     private static func findBrewPath() -> String {
         if FileManager.default.isExecutableFile(atPath: "/opt/homebrew/bin/brew") {
@@ -99,33 +91,41 @@ class ServiceManager: ObservableObject {
         return "/usr/local/bin/brew"
     }
 
-    private static func findLegionioPath() -> String {
-        if FileManager.default.isExecutableFile(atPath: "/opt/homebrew/bin/legionio") {
-            return "/opt/homebrew/bin/legionio"
+    /// Detect the brew log path for legionio from `brew services info --json`.
+    /// Falls back to the standard Homebrew log location.
+    private static func detectBrewLogPath(brew: String) -> String {
+        let process = Process()
+        let pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: brew)
+        process.arguments = ["services", "info", "legionio", "--json"]
+        process.environment = brewEnvironment
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            if let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+               let first = json.first,
+               let logPath = first["log_path"] as? String,
+               !logPath.isEmpty {
+                return logPath
+            }
+        } catch {}
+
+        // Fallback: standard Homebrew log location
+        if FileManager.default.isExecutableFile(atPath: "/opt/homebrew/bin/brew") {
+            return "/opt/homebrew/var/log/legion/legion.log"
         }
-        return "/usr/local/bin/legionio"
-    }
-
-    /// The known log file we write to when we launch the daemon ourselves.
-    /// This file is always valid to tail — even after the app is closed and reopened.
-    static var interlinkLogPath: String = {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let dir = "\(home)/.legionio/logs"
-        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        return "\(dir)/interlink.log"
-    }()
-
-    private static func findLogPath(brew: String) -> String {
-        return Self.interlinkLogPath
+        return "/usr/local/var/log/legion/legion.log"
     }
 
     init() {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        self.legionHome = "\(home)/.legionio"
         self.agenticMarkerPath = "\(home)/.legionio/.packs/agentic"
         self.resolvedBrewPath = Self.findBrewPath()
-        self.resolvedLegionioPath = Self.findLegionioPath()
-        self.logPath = Self.findLogPath(brew: "")
+        self.logPath = Self.detectBrewLogPath(brew: Self.findBrewPath())
         checkSetupNeeded()
         startPolling()
     }
@@ -156,23 +156,10 @@ class ServiceManager: ObservableObject {
         updateServiceStatus(service, .starting)
         suppressPolling = true
         let brew = resolvedBrewPath
-        let legionio = resolvedLegionioPath
-        let home = legionHome
         let name = service.brewName
-        let healthURL = daemonHealthURL
         Task.detached {
-            if service == .legionio {
-                Self.runProcessAsync(brew, arguments: ["services", "stop", "legionio"])
-                try? await Task.sleep(nanoseconds: 500_000_000)
-                // Launch daemon with stdout/stderr piped so we can stream logs live.
-                // `legionio start` blocks until the daemon exits, so this runs in a
-                // detached task and we wait for the HTTP health endpoint separately.
-                await self.launchDaemonWithStdoutCapture(executable: legionio, workingDirectory: home)
-                await Self.waitForServiceReady(service: service, brew: brew, healthURL: healthURL, target: true, timeout: 60)
-            } else {
-                Self.runProcess(brew, arguments: ["services", "start", name])
-                await Self.waitForServiceReady(service: service, brew: brew, healthURL: healthURL, target: true, timeout: 60)
-            }
+            Self.runProcess(brew, arguments: ["services", "start", name])
+            await Self.waitForServiceReady(service: service, brew: brew, target: true, timeout: 60)
             await MainActor.run {
                 self.updateServiceStatus(service, .running)
                 self.suppressPolling = false
@@ -181,112 +168,22 @@ class ServiceManager: ObservableObject {
         }
     }
 
-    // MARK: - Daemon Stdout Streaming
-
-    /// Launch the legionio daemon, capturing its stdout+stderr and streaming
-    /// every line into `logContents` in real time.  Output is also written to
-    /// `~/.legionio/logs/interlink.log` so the Logs tab can tail it after the
-    /// app is closed and reopened while the daemon continues running.
-    private func launchDaemonWithStdoutCapture(executable: String, workingDirectory: String) async {
-        // Tear down any previous process that might still be lingering.
-        tearDownDaemonProcess()
-
-        let logFile = Self.interlinkLogPath
-
-        // Use `sh -c` to pipe daemon output through `tee -a` so we capture it
-        // via the pipe AND persist it to disk for future app launches.
-        let process = Process()
-        let pipe = Pipe()
-
-        process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = ["-c", "\(executable) start 2>&1 | tee -a \(logFile)"]
-        process.currentDirectoryURL = URL(fileURLWithPath: workingDirectory)
-        process.environment = Self.brewEnvironment
-        process.standardOutput = pipe
-        process.standardError = pipe
-
-        // Store strong references before the handler captures them.
-        daemonProcess = process
-        daemonPipe = pipe
-
-        // Buffer incomplete lines in a thread-local box so we don't touch
-        // @MainActor-isolated state from the readabilityHandler's queue.
-        final class LineBuffer: @unchecked Sendable { var value = "" }
-        let lineBuffer = LineBuffer()
-
-        pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            guard !data.isEmpty, let self else { return }
-            guard let chunk = String(data: data, encoding: .utf8) else { return }
-
-            // Buffer incomplete lines so we only append whole lines to logContents.
-            var lines = (lineBuffer.value + chunk).components(separatedBy: "\n")
-            // The last element is either "" (chunk ended with \n) or a partial line.
-            lineBuffer.value = lines.removeLast()
-
-            guard !lines.isEmpty else { return }
-            let newText = lines.joined(separator: "\n") + "\n"
-
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                self.logContents += newText
-                // Cap in-memory log to ~4 000 lines to avoid unbounded growth.
-                let allLines = self.logContents.components(separatedBy: "\n")
-                if allLines.count > 4_100 {
-                    self.logContents = allLines.suffix(4_000).joined(separator: "\n")
-                }
-            }
-        }
-
-        process.terminationHandler = { [weak self] _ in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                self.daemonPipe?.fileHandleForReading.readabilityHandler = nil
-                self.daemonProcess = nil
-                self.daemonPipe = nil
-            }
-        }
-
-        do {
-            try process.run()
-        } catch {
-            daemonProcess = nil
-            daemonPipe = nil
-            await MainActor.run {
-                self.logContents += "[interlink] failed to launch daemon: \(error.localizedDescription)\n"
-            }
-        }
-    }
-
-    /// Clean up a running daemon process reference (does NOT send SIGTERM — the
-    /// regular stopService path handles that).
-    private func tearDownDaemonProcess() {
-        daemonPipe?.fileHandleForReading.readabilityHandler = nil
-        daemonProcess = nil
-        daemonPipe = nil
-    }
-
     func stopService(_ service: ServiceName) {
         updateServiceStatus(service, .stopping)
         if service == .legionio {
             daemonReadiness = DaemonReadiness()
-            tearDownDaemonProcess()
         }
         suppressPolling = true
         let brew = resolvedBrewPath
-        let legionio = resolvedLegionioPath
         let name = service.brewName
-        let healthURL = daemonHealthURL
         Task.detached {
+            Self.runProcess(brew, arguments: ["services", "stop", name])
             if service == .legionio {
-                Self.runProcess(legionio, arguments: ["stop"])
-                Self.runProcessAsync(brew, arguments: ["services", "stop", "legionio"])
+                // Fallback: kill any lingering process on the daemon port
                 Self.killProcessOnPort(Self.daemonPort)
-            } else {
-                Self.runProcess(brew, arguments: ["services", "stop", name])
             }
             // Wait until health check confirms the service is actually down
-            await Self.waitForServiceReady(service: service, brew: brew, healthURL: healthURL, target: false, timeout: 60)
+            await Self.waitForServiceReady(service: service, brew: brew, target: false, timeout: 60)
             await MainActor.run {
                 self.updateServiceStatus(service, .stopped)
                 self.suppressPolling = false
@@ -296,46 +193,18 @@ class ServiceManager: ObservableObject {
     }
 
     func restartService(_ service: ServiceName) {
-        if service == .legionio {
-            restartDaemon()
-            return
-        }
         updateServiceStatus(service, .stopping)
         suppressPolling = true
         let brew = resolvedBrewPath
         let name = service.brewName
-        let healthURL = daemonHealthURL
         Task.detached {
             Self.runProcess(brew, arguments: ["services", "restart", name])
-            await Self.waitForServiceReady(service: service, brew: brew, healthURL: healthURL, target: true, timeout: 60)
+            await Self.waitForServiceReady(service: service, brew: brew, target: true, timeout: 60)
             await MainActor.run {
+                self.updateServiceStatus(service, .running)
                 self.suppressPolling = false
                 self.recalculateOverallStatus()
             }
-            await self.checkAllServices()
-        }
-    }
-
-    func restartDaemon() {
-        updateServiceStatus(.legionio, .stopping)
-        tearDownDaemonProcess()
-        suppressPolling = true
-        let brew = resolvedBrewPath
-        let legionio = resolvedLegionioPath
-        let home = legionHome
-        let healthURL = daemonHealthURL
-        Task.detached {
-            // Stop
-            Self.runProcess(legionio, arguments: ["stop"])
-            Self.runProcessAsync(brew, arguments: ["services", "stop", "legionio"])
-            Self.killProcessOnPort(4567)
-            await Self.waitForServiceReady(service: .legionio, brew: brew, healthURL: healthURL, target: false, timeout: 60)
-            // Start with stdout capture
-            await self.updateServiceStatus(.legionio, .starting)
-            await self.launchDaemonWithStdoutCapture(executable: legionio, workingDirectory: home)
-            await Self.waitForServiceReady(service: .legionio, brew: brew, healthURL: healthURL, target: true, timeout: 60)
-            await MainActor.run { self.suppressPolling = false }
-            await self.checkAllServices()
         }
     }
 
@@ -348,25 +217,23 @@ class ServiceManager: ObservableObject {
         async let redisResult = Self.checkBrewService(brew: brew, name: ServiceName.redis.brewName)
         async let memcachedResult = Self.checkBrewService(brew: brew, name: ServiceName.memcached.brewName)
         async let ollamaResult = Self.checkBrewService(brew: brew, name: ServiceName.ollama.brewName)
-        async let daemonResult = Self.checkDaemonHealth(url: daemonHealthURL)
+        async let legionioResult = Self.checkBrewService(brew: brew, name: ServiceName.legionio.brewName)
+        async let daemonHealthResult = Self.checkDaemonHealth(url: daemonHealthURL)
 
         let redis = await redisResult
         let memcached = await memcachedResult
         let ollama = await ollamaResult
-        let daemon = await daemonResult
+        let legionio = await legionioResult
+        let daemonHealth = await daemonHealthResult
 
         // Update UI on main actor — skip services in transition states
         updateServiceIfStable(.redis, redis.running ? .running : .stopped, pid: redis.pid)
         updateServiceIfStable(.memcached, memcached.running ? .running : .stopped, pid: memcached.pid)
         updateServiceIfStable(.ollama, ollama.running ? .running : .stopped, pid: ollama.pid)
+        updateServiceIfStable(.legionio, legionio.running ? .running : .stopped, pid: legionio.pid)
 
-        daemonReadiness = daemon.readiness
-        if daemon.responding {
-            let daemonPid = await Self.pidOnPort(Self.daemonPort)
-            updateServiceIfStable(.legionio, .running, pid: daemonPid)
-        } else {
-            updateServiceIfStable(.legionio, .stopped)
-        }
+        // Update daemon readiness from HTTP health (component-level detail)
+        daemonReadiness = daemonHealth.readiness
 
         lastChecked = Date()
         recalculateOverallStatus()
@@ -388,8 +255,6 @@ class ServiceManager: ObservableObject {
     }
 
     func refreshLogs() {
-        // Don't clobber live stdout streaming — only poll the file when we're not streaming
-        guard !isStreamingLogs else { return }
         let path = logPath
         Task.detached {
             let content = Self.tailFile(path: path, lines: 200)
@@ -398,10 +263,8 @@ class ServiceManager: ObservableObject {
     }
 
     /// Start fast log streaming (call when Logs tab is visible).
-    /// If the daemon is being streamed live via pipe, this is a no-op.
-    /// Otherwise, it starts a `tail -f` process on the log file for live output.
+    /// Starts a `tail -f` process on the brew log file for live output.
     func startFastLogPolling() {
-        guard !isStreamingLogs else { return }
         guard tailProcess == nil else { return }
         // First show a snapshot of recent lines
         refreshLogs()
@@ -550,25 +413,10 @@ class ServiceManager: ObservableObject {
         process.waitUntilExit()
     }
 
-    /// Fire-and-forget: launch a process without waiting for it to finish.
-    /// Use for commands that may hang (e.g. `brew services stop legionio`).
-    private nonisolated static func runProcessAsync(_ executable: String, arguments: [String], workingDirectory: String? = nil) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = arguments
-        process.environment = brewEnvironment
-        if let workingDirectory {
-            process.currentDirectoryURL = URL(fileURLWithPath: workingDirectory)
-        }
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        try? process.run()
-    }
-
     /// Poll a service until it reaches the target state (running or stopped), up to `timeout` seconds.
-    /// Checks every 2 seconds. For legionio, checks the HTTP health endpoint; for others, checks brew services.
+    /// Checks every second using `brew services info`.
     private nonisolated static func waitForServiceReady(
-        service: ServiceName, brew: String, healthURL: URL, target: Bool, timeout: Int
+        service: ServiceName, brew: String, target: Bool, timeout: Int
     ) async {
         let interval: UInt64 = 1_000_000_000  // 1 second
         let maxAttempts = timeout
@@ -576,35 +424,14 @@ class ServiceManager: ObservableObject {
         for _ in 0..<maxAttempts {
             try? await Task.sleep(nanoseconds: interval)
 
-            let isRunning: Bool
-            if service == .legionio {
-                let result = await checkDaemonHealth(url: healthURL)
-                isRunning = result.responding
-            } else {
-                let result = await checkBrewService(brew: brew, name: service.brewName)
-                isRunning = result.running
-            }
-
-            if isRunning == target {
+            let result = await checkBrewService(brew: brew, name: service.brewName)
+            if result.running == target {
                 return
             }
         }
     }
 
-    /// Simple check: is the daemon responding with HTTP 200? Doesn't care about ready state.
-    private nonisolated static func checkDaemonResponding(url: URL) async -> Bool {
-        do {
-            let (_, response) = try await URLSession.shared.data(from: url)
-            if let httpResponse = response as? HTTPURLResponse {
-                return httpResponse.statusCode == 200
-            }
-        } catch {
-            // Connection refused / timeout — daemon is down
-        }
-        return false
-    }
-
-    /// Kill processes listening on a given port. Fallback for when `legionio stop` can't find its PID file.
+    /// Kill processes listening on a given port. Fallback for when brew services stop leaves a lingering process.
     /// Uses -sTCP:LISTEN to only target servers, not clients (avoids killing ourselves).
     private nonisolated static func killProcessOnPort(_ port: Int) {
         let process = Process()
@@ -702,27 +529,6 @@ class ServiceManager: ObservableObject {
         return (DaemonReadiness(), false)
     }
 
-    /// Get the PID of the process listening on a given port.
-    private nonisolated static func pidOnPort(_ port: Int) async -> Int? {
-        let process = Process()
-        let pipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
-        process.arguments = ["-ti:\(port)", "-sTCP:LISTEN"]
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            if let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
-               let pid = Int(output.components(separatedBy: "\n").first ?? "") {
-                return pid
-            }
-        } catch {}
-        return nil
-    }
-
     /// Read the tail of a log file. Runs off main thread.
     private nonisolated static func tailFile(path: String, lines: Int) -> String {
         let process = Process()
@@ -805,7 +611,6 @@ class ServiceManager: ObservableObject {
     deinit {
         timer?.invalidate()
         logTimer?.invalidate()
-        daemonPipe?.fileHandleForReading.readabilityHandler = nil
         tailProcess?.terminate()
         tailProcess?.standardOutput.map { ($0 as? Pipe)?.fileHandleForReading.readabilityHandler = nil }
     }

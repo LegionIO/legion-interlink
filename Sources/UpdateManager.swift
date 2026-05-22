@@ -171,7 +171,7 @@ class UpdateManager: ObservableObject {
             }
 
             if success && isLegionioBrew {
-                await ServiceManager.shared.restartDaemon()
+                await ServiceManager.shared.restartService(.legionio)
             }
         }
     }
