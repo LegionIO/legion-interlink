@@ -95,6 +95,8 @@ private struct BreathingStatusPill: View {
 private struct PulsingStatusText: View {
     let status: ServiceStatus
     @State private var pulse = false
+    @State private var elapsedSeconds = 0
+    @State private var elapsedTimer: Timer?
 
     private var isTransitioning: Bool {
         status == .starting || status == .stopping
@@ -111,30 +113,58 @@ private struct PulsingStatusText: View {
     }
 
     var body: some View {
-        Text(status.rawValue.lowercased())
-            .font(.system(size: 10, design: .monospaced))
-            .foregroundColor(color)
-            .opacity(isTransitioning && pulse ? 0.3 : 1.0)
-            .onAppear {
-                if isTransitioning {
-                    withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
-                        pulse = true
-                    }
+        HStack(spacing: 4) {
+            Text(status.rawValue.lowercased())
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(color)
+                .opacity(isTransitioning && pulse ? 0.3 : 1.0)
+
+            if isTransitioning {
+                Text("\(elapsedSeconds)s")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(color.opacity(0.6))
+            }
+        }
+        .onAppear {
+            if isTransitioning {
+                startTimer()
+                withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
+                    pulse = true
                 }
             }
-            .onChange(of: status) { newStatus in
-                let transitioning = newStatus == .starting || newStatus == .stopping
-                if transitioning {
+        }
+        .onDisappear {
+            stopTimer()
+        }
+        .onChange(of: status) { newStatus in
+            let transitioning = newStatus == .starting || newStatus == .stopping
+            if transitioning {
+                elapsedSeconds = 0
+                startTimer()
+                pulse = false
+                withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
+                    pulse = true
+                }
+            } else {
+                stopTimer()
+                elapsedSeconds = 0
+                withAnimation(.default) {
                     pulse = false
-                    withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
-                        pulse = true
-                    }
-                } else {
-                    withAnimation(.default) {
-                        pulse = false
-                    }
                 }
             }
+        }
+    }
+
+    private func startTimer() {
+        stopTimer()
+        elapsedTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
+            elapsedSeconds += 1
+        }
+    }
+
+    private func stopTimer() {
+        elapsedTimer?.invalidate()
+        elapsedTimer = nil
     }
 }
 
