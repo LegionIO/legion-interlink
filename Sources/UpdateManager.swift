@@ -37,7 +37,6 @@ class UpdateManager: ObservableObject {
     private init() {
         resolvedBrewPath = Self.findPath("/opt/homebrew/bin/brew", fallback: "/usr/local/bin/brew")
         resolvedLegionGemPath = Self.findPath("/opt/homebrew/bin/legion-gem", fallback: "/usr/local/bin/legion-gem")
-        requestNotificationPermission()
         startBackgroundChecks()
     }
 
@@ -55,10 +54,6 @@ class UpdateManager: ObservableObject {
 
     // MARK: - Notifications
 
-    private func requestNotificationPermission() {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge]) { _, _ in }
-    }
-
     private nonisolated func sendNotification(title: String, body: String) {
         let content = UNMutableNotificationContent()
         content.title = title
@@ -69,7 +64,14 @@ class UpdateManager: ObservableObject {
             content: content,
             trigger: nil
         )
-        UNUserNotificationCenter.current().add(request)
+        // Request permission on the fly the first time we try to send a notification.
+        // Must happen on main thread; bail silently if not granted or not available.
+        DispatchQueue.main.async {
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge]) { granted, _ in
+                guard granted else { return }
+                UNUserNotificationCenter.current().add(request)
+            }
+        }
     }
 
     // MARK: - Background Periodic Check
