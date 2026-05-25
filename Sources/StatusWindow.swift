@@ -847,7 +847,7 @@ struct LogsTab: View {
                             ForEach(manager.logLines) { line in
                                 Text(line.text)
                                     .font(.system(size: 11, design: .monospaced))
-                                    .foregroundColor(Color(red: 0.35, green: 0.88, blue: 0.48).opacity(0.85))
+                                    .foregroundColor(Self.colorForLogLine(line.text))
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .textSelection(.enabled)
                             }
@@ -872,6 +872,29 @@ struct LogsTab: View {
         .background(TerminalTheme.bg)
         .onAppear { manager.startFastLogPolling() }
         .onDisappear { manager.stopFastLogPolling() }
+    }
+
+    private static let logDebug = Color(red: 0.55, green: 0.80, blue: 0.95)
+    private static let logInfo = Color(red: 0.35, green: 0.88, blue: 0.48).opacity(0.85)
+    private static let logWarn = Color(red: 0.90, green: 0.75, blue: 0.20)
+    private static let logError = Color(red: 0.95, green: 0.35, blue: 0.35)
+    private static let logFatal = Color(red: 0.75, green: 0.15, blue: 0.15)
+
+    private static func colorForLogLine(_ text: String) -> Color {
+        let prefix = text.prefix(120)
+        if prefix.contains("FATAL") || prefix.contains("F, [") {
+            return logFatal
+        }
+        if prefix.contains("ERROR") || prefix.contains("E, [") {
+            return logError
+        }
+        if prefix.contains("WARN") || prefix.contains("W, [") {
+            return logWarn
+        }
+        if prefix.contains("DEBUG") || prefix.contains("D, [") {
+            return logDebug
+        }
+        return logInfo
     }
 }
 
