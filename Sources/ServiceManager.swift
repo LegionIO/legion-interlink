@@ -67,8 +67,19 @@ class ServiceManager: ObservableObject {
     @Published var daemonReadiness = DaemonReadiness()
     @Published var overallStatus: OverallStatus = .checking
     @Published var lastChecked: Date?
-    @Published var logContents: String = ""
+    @Published var logLines: [LogLine] = []
     @Published var errorLogContents: String = ""
+
+    private static let maxLogLines = 2_000
+    private static let trimLogLines = 1_500
+    private var nextLogLineID: Int = 0
+
+    struct LogLine: Identifiable {
+        let id: Int
+        let text: String
+    }
+
+    var logContents: String { logLines.map(\.text).joined(separator: "\n") }
     @Published var setupNeeded: Bool = false
 
     /// When true, background polling skips checkAllServices to avoid overwriting transition states.
@@ -254,10 +265,10 @@ class ServiceManager: ObservableObject {
     private var tailProcess: Process?
 
     func clearLogs() {
-        logContents = ""
+        logLines = []
+        nextLogLineID = 0
         let path = logPath
         Task.detached {
-            // Truncate rather than delete so the daemon's open file handle stays valid
             if let fh = FileHandle(forWritingAtPath: path) {
                 fh.truncateFile(atOffset: 0)
                 fh.closeFile()
@@ -269,7 +280,14 @@ class ServiceManager: ObservableObject {
         let path = logPath
         Task.detached {
             let content = Self.tailFile(path: path, lines: 200)
-            await MainActor.run { self.logContents = content }
+            let lines = content.components(separatedBy: "\n")
+            await MainActor.run {
+                self.logLines = lines.map { text in
+                    let line = LogLine(id: self.nextLogLineID, text: text)
+                    self.nextLogLineID += 1
+                    return line
+                }
+            }
         }
     }
 
@@ -297,7 +315,7 @@ class ServiceManager: ObservableObject {
         startTailProcess(path: path)
     }
 
-    /// Start a `tail -f` process on the given file, streaming new lines into logContents.
+    /// Start a `tail -f` process on the given file, streaming new lines into logLines.
     private func startTailProcess(path: String) {
         let process = Process()
         let pipe = Pipe()
@@ -316,13 +334,17 @@ class ServiceManager: ObservableObject {
             var lines = (lineBuffer.value + chunk).components(separatedBy: "\n")
             lineBuffer.value = lines.removeLast()
             guard !lines.isEmpty else { return }
-            let newText = lines.joined(separator: "\n") + "\n"
+            let newLines = lines
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                self.logContents += newText
-                let allLines = self.logContents.components(separatedBy: "\n")
-                if allLines.count > 4_100 {
-                    self.logContents = allLines.suffix(4_000).joined(separator: "\n")
+                let logEntries = newLines.map { text in
+                    let entry = LogLine(id: self.nextLogLineID, text: text)
+                    self.nextLogLineID += 1
+                    return entry
+                }
+                self.logLines.append(contentsOf: logEntries)
+                if self.logLines.count > Self.maxLogLines {
+                    self.logLines.removeFirst(self.logLines.count - Self.trimLogLines)
                 }
             }
         }
@@ -339,7 +361,8 @@ class ServiceManager: ObservableObject {
             try process.run()
             tailProcess = process
         } catch {
-            logContents += "[interlink] failed to tail log file: \(error.localizedDescription)\n"
+            logLines.append(LogLine(id: nextLogLineID, text: "[interlink] failed to tail log file: \(error.localizedDescription)"))
+            nextLogLineID += 1
         }
     }
 
@@ -619,14 +642,12 @@ class ServiceManager: ObservableObject {
 
     private func startPolling() {
         Task { await checkAllServices() }
-        refreshLogs()
         timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
             guard let self else { return }
             Task { @MainActor in
                 if !self.suppressPolling {
                     await self.checkAllServices()
                 }
-                self.refreshLogs()
             }
         }
     }

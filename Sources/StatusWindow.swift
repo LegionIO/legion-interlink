@@ -809,6 +809,10 @@ struct LogsTab: View {
 
                 Spacer()
 
+                Text("\(manager.logLines.count) lines")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(TerminalTheme.textDim.opacity(0.5))
+
                 Toggle(isOn: $autoScroll) {
                     Text("auto-scroll")
                         .font(.system(size: 9, design: .monospaced))
@@ -829,28 +833,34 @@ struct LogsTab: View {
                 alignment: .bottom
             )
 
-            // Log content
+            // Virtualized log content
             ScrollViewReader { proxy in
                 ScrollView(.vertical) {
-                    Text(manager.logContents.isEmpty ? "$ waiting for log output..." : manager.logContents)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(
-                            manager.logContents.isEmpty
-                                ? TerminalTheme.textDim
-                                : Color(red: 0.35, green: 0.88, blue: 0.48).opacity(0.85)
-                        )
-                        .lineLimit(nil)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
+                    if manager.logLines.isEmpty {
+                        Text("$ waiting for log output...")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(TerminalTheme.textDim)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(12)
+                    } else {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(manager.logLines) { line in
+                                Text(line.text)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundColor(Color(red: 0.35, green: 0.88, blue: 0.48).opacity(0.85))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .textSelection(.enabled)
+                            }
+                        }
                         .padding(12)
+                    }
 
                     Color.clear
                         .frame(height: 1)
                         .id("logEnd")
                 }
                 .background(TerminalTheme.bg)
-                .onChange(of: manager.logContents) { _ in
+                .onChange(of: manager.logLines.count) { _ in
                     if autoScroll {
                         withAnimation(.easeOut(duration: 0.1)) {
                             proxy.scrollTo("logEnd", anchor: .bottom)
