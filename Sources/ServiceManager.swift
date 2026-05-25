@@ -94,6 +94,7 @@ class ServiceManager: ObservableObject {
 
     /// Resolved once at init — no repeated filesystem checks.
     private let resolvedBrewPath: String
+    var resolvedBrewPathPublic: String { resolvedBrewPath }
 
     private static func findBrewPath() -> String {
         if FileManager.default.isExecutableFile(atPath: "/opt/homebrew/bin/brew") {
