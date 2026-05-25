@@ -4,7 +4,6 @@ import UserNotifications
 
 struct UpdateItem: Identifiable {
     enum Source: String {
-        case brew = "brew"
         case gem = "gem"
     }
 
@@ -17,6 +16,7 @@ struct UpdateItem: Identifiable {
 
     var isLex: Bool { name.hasPrefix("lex-") }
     var isCoreLibrary: Bool { name.hasPrefix("legion-") || name == "legionio" }
+    var isLegionio: Bool { name == "legionio" }
 }
 
 @MainActor
@@ -40,7 +40,7 @@ class UpdateManager: ObservableObject {
         startBackgroundChecks()
     }
 
-    private static func findPath(_ primary: String, fallback: String) -> String {
+    static func findPath(_ primary: String, fallback: String) -> String {
         FileManager.default.isExecutableFile(atPath: primary) ? primary : fallback
     }
 
@@ -96,30 +96,23 @@ class UpdateManager: ObservableObject {
         isChecking = true
         checkError = nil
 
-        let brew = resolvedBrewPath
         let legionGem = resolvedLegionGemPath
-
-        async let brewResult = Self.checkBrewOutdated(brew: brew)
-        async let gemResult = Self.checkGemOutdated(legionGem: legionGem)
-
-        let brewItems = await brewResult
-        let gemItems = await gemResult
+        let gemItems = await Self.checkGemOutdated(legionGem: legionGem)
 
         let previousCount = items.count
-        items = brewItems + gemItems
+        items = gemItems
         hasChecked = true
         lastChecked = Date()
         isChecking = false
 
-        // Notify if new updates were found
         if !items.isEmpty && items.count > previousCount {
-            let brewCount = brewItems.count
-            let coreCount = gemItems.filter(\.isCoreLibrary).count
+            let legionioCount = gemItems.filter(\.isLegionio).count
+            let coreCount = gemItems.filter { $0.isCoreLibrary && !$0.isLegionio }.count
 
-            if brewCount > 0 {
+            if legionioCount > 0 {
                 sendNotification(
                     title: "LegionIO Update Available",
-                    body: "A new version of legionio is available via Homebrew."
+                    body: "A new version of legionio is available."
                 )
             }
             if coreCount > 0 {
@@ -130,7 +123,6 @@ class UpdateManager: ObservableObject {
             }
         }
 
-        // Auto-update lex-* gems (they keep old versions so no runtime breakage)
         if autoUpdateLex {
             let lexItems = items.filter(\.isLex)
             for item in lexItems {
@@ -148,16 +140,14 @@ class UpdateManager: ObservableObject {
         let brew = resolvedBrewPath
         let legionGem = resolvedLegionGemPath
         let name = item.name
-        let source = item.source
-        let isLegionioBrew = source == .brew
+        let isLegionio = item.isLegionio
 
         Task.detached {
-            let success: Bool
-            switch source {
-            case .brew:
-                success = Self.runSync(brew, arguments: ["upgrade", name])
-            case .gem:
-                success = Self.runSync(legionGem, arguments: ["update", name])
+            let success = Self.runSync(legionGem, arguments: ["update", name])
+
+            // For legionio itself, also run brew upgrade to update the CLI binary
+            if success && isLegionio {
+                _ = Self.runSync(brew, arguments: ["upgrade", "legionio"])
             }
 
             await MainActor.run {
@@ -170,7 +160,7 @@ class UpdateManager: ObservableObject {
                 }
             }
 
-            if success && isLegionioBrew {
+            if success && isLegionio {
                 await ServiceManager.shared.restartService(.legionio)
             }
         }
@@ -201,43 +191,6 @@ class UpdateManager: ObservableObject {
                     }
                 }
             }
-        }
-    }
-
-    // MARK: - Brew Parsing
-
-    private nonisolated static func checkBrewOutdated(brew: String) async -> [UpdateItem] {
-        let process = Process()
-        let pipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: brew)
-        process.arguments = ["outdated", "--json", "legionio/tap/legionio"]
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
-            return []
-        }
-
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let formulae = json["formulae"] as? [[String: Any]] else {
-            return []
-        }
-
-        return formulae.compactMap { formula in
-            guard let name = formula["name"] as? String,
-                  let installed = (formula["installed_versions"] as? [String])?.first,
-                  let available = formula["current_version"] as? String else { return nil }
-            return UpdateItem(
-                id: "brew:\(name)",
-                name: name,
-                currentVersion: installed,
-                availableVersion: available,
-                source: .brew
-            )
         }
     }
 

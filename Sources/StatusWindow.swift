@@ -455,6 +455,10 @@ struct StatusWindowView: View {
 
 struct ServicesTab: View {
     @EnvironmentObject var manager: ServiceManager
+    @State private var installationState: [ServiceName: Bool] = [:]
+    @State private var kaiInstalled: Bool = false
+    @State private var kaiRunning: Bool = false
+    @State private var installing: Set<ServiceName> = []
 
     private var anyTransitioning: Bool {
         manager.services.contains { $0.status == .starting || $0.status == .stopping }
@@ -474,19 +478,70 @@ struct ServicesTab: View {
 
             ScrollView {
                 VStack(spacing: 12) {
-                    // Service Cards
                     ForEach(manager.services) { service in
-                        if service.name == .legionio {
+                        let installed = installationState[service.name] ?? true
+                        if !installed {
+                            notInstalledCard(service.name)
+                        } else if service.name == .legionio {
                             daemonCard(service)
                         } else {
                             serviceCard(service)
                         }
                     }
+
+                    kaiCard
                 }
                 .padding(16)
             }
         }
         .background(TerminalTheme.bg)
+        .task { checkInstallation() }
+    }
+
+    // MARK: - Installation Detection
+
+    private func checkInstallation() {
+        let fm = FileManager.default
+        let brewBin = fm.isExecutableFile(atPath: "/opt/homebrew/bin/brew") ? "/opt/homebrew/bin" : "/usr/local/bin"
+
+        installationState[.legionio] = fm.isExecutableFile(atPath: "\(brewBin)/legionio")
+        installationState[.redis] = fm.isExecutableFile(atPath: "\(brewBin)/redis-server") || fm.isExecutableFile(atPath: "/opt/homebrew/opt/redis/bin/redis-server")
+        installationState[.memcached] = fm.isExecutableFile(atPath: "\(brewBin)/memcached") || fm.isExecutableFile(atPath: "/opt/homebrew/opt/memcached/bin/memcached")
+        installationState[.ollama] = fm.isExecutableFile(atPath: "\(brewBin)/ollama") || fm.isExecutableFile(atPath: "/usr/local/bin/ollama")
+
+        kaiInstalled = fm.fileExists(atPath: "/Applications/Kai.app") ||
+            fm.fileExists(atPath: "\(FileManager.default.homeDirectoryForCurrentUser.path)/Applications/Kai.app")
+        kaiRunning = NSWorkspace.shared.runningApplications.contains { $0.bundleIdentifier == "io.legionio.kai" }
+    }
+
+    private func installService(_ service: ServiceName) {
+        installing.insert(service)
+        let brew = ServiceManager.shared.resolvedBrewPathPublic
+        let formula: String
+        switch service {
+        case .legionio:  formula = "legionio/tap/legionio"
+        case .redis:     formula = "redis"
+        case .memcached: formula = "memcached"
+        case .ollama:    formula = "ollama"
+        }
+
+        Task.detached {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: brew)
+            process.arguments = ["install", formula]
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            try? process.run()
+            process.waitUntilExit()
+            let success = process.terminationStatus == 0
+
+            await MainActor.run {
+                installing.remove(service)
+                if success {
+                    installationState[service] = true
+                }
+            }
+        }
     }
 
     // MARK: - Header
@@ -528,12 +583,117 @@ struct ServicesTab: View {
         )
     }
 
+    // MARK: - Not Installed Card
+
+    private func notInstalledCard(_ service: ServiceName) -> some View {
+        HoverCard {
+            HStack(spacing: 12) {
+                PulsingDot(color: TerminalTheme.gray, isTransitioning: false)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(service.displayName)
+                        .font(.system(size: 13, weight: .medium, design: .monospaced))
+                        .foregroundColor(TerminalTheme.text)
+
+                    Text("not installed")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(TerminalTheme.textDim)
+                }
+
+                Spacer()
+
+                if installing.contains(service) {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .scaleEffect(0.7)
+                    Text("installing...")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(TerminalTheme.textDim)
+                } else {
+                    terminalButton("install", color: TerminalTheme.accent) {
+                        installService(service)
+                    }
+                }
+            }
+            .padding(12)
+        }
+    }
+
+    // MARK: - Kai Card
+
+    private var kaiCard: some View {
+        HoverCard {
+            HStack(spacing: 12) {
+                PulsingDot(
+                    color: kaiInstalled ? (kaiRunning ? TerminalTheme.green : TerminalTheme.gray) : TerminalTheme.gray,
+                    isTransitioning: false
+                )
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Kai")
+                        .font(.system(size: 13, weight: .medium, design: .monospaced))
+                        .foregroundColor(TerminalTheme.text)
+
+                    Text(kaiInstalled ? (kaiRunning ? "running" : "installed") : "not installed")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(kaiRunning ? TerminalTheme.green : TerminalTheme.textDim)
+                }
+
+                Spacer()
+
+                if kaiInstalled {
+                    if kaiRunning {
+                        terminalButton("focus", color: TerminalTheme.accent) {
+                            activateKai()
+                        }
+                    } else {
+                        terminalButton("open", color: TerminalTheme.green) {
+                            openKai()
+                        }
+                    }
+                } else {
+                    terminalButton("install", color: TerminalTheme.accent) {
+                        installKai()
+                    }
+                }
+            }
+            .padding(12)
+        }
+    }
+
+    private func openKai() {
+        NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/Kai.app"))
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { kaiRunning = true }
+    }
+
+    private func activateKai() {
+        if let app = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == "io.legionio.kai" }) {
+            app.activate()
+        }
+    }
+
+    private func installKai() {
+        let brew = ServiceManager.shared.resolvedBrewPathPublic
+        Task.detached {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: brew)
+            process.arguments = ["install", "--cask", "legionio/tap/kai"]
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            try? process.run()
+            process.waitUntilExit()
+            let success = process.terminationStatus == 0
+            await MainActor.run {
+                if success { kaiInstalled = true }
+            }
+        }
+    }
+
     // MARK: - Daemon Card (LegionIO with components)
 
     private func daemonCard(_ service: ServiceState) -> some View {
         HoverCard {
             VStack(spacing: 0) {
-                // Main service row
                 HStack(spacing: 12) {
                     statusDot(service.status)
 
@@ -555,7 +715,6 @@ struct ServicesTab: View {
 
                     Spacer()
 
-                    // Control buttons: start / restart / stop
                     HStack(spacing: 6) {
                         if service.status == .stopping || service.status == .starting {
                             // No button while transitioning
@@ -575,7 +734,6 @@ struct ServicesTab: View {
                 }
                 .padding(12)
 
-                // Daemon Components (inline)
                 if service.status == .running && !manager.daemonReadiness.components.isEmpty {
                     Rectangle()
                         .fill(TerminalTheme.border)
@@ -614,10 +772,8 @@ struct ServicesTab: View {
     private func serviceCard(_ service: ServiceState) -> some View {
         HoverCard {
             HStack(spacing: 12) {
-                // Status indicator
                 statusDot(service.status)
 
-                // Service info
                 VStack(alignment: .leading, spacing: 2) {
                     Text(service.name.displayName)
                         .font(.system(size: 13, weight: .medium, design: .monospaced))
@@ -636,7 +792,6 @@ struct ServicesTab: View {
 
                 Spacer()
 
-                // Control buttons: start / restart / stop
                 HStack(spacing: 6) {
                     if service.status == .stopping || service.status == .starting {
                         // No button while transitioning
@@ -681,7 +836,6 @@ struct ServicesTab: View {
     private func terminalButton(_ label: String, color: Color, action: @escaping () -> Void) -> some View {
         TerminalActionButton(label: label, color: color, action: action)
     }
-
 }
 
 // MARK: - Terminal Action Button (with hover)
@@ -809,6 +963,10 @@ struct LogsTab: View {
 
                 Spacer()
 
+                Text("\(manager.logLines.count) lines")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(TerminalTheme.textDim.opacity(0.5))
+
                 Toggle(isOn: $autoScroll) {
                     Text("auto-scroll")
                         .font(.system(size: 9, design: .monospaced))
@@ -829,28 +987,34 @@ struct LogsTab: View {
                 alignment: .bottom
             )
 
-            // Log content
+            // Virtualized log content
             ScrollViewReader { proxy in
                 ScrollView(.vertical) {
-                    Text(manager.logContents.isEmpty ? "$ waiting for log output..." : manager.logContents)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(
-                            manager.logContents.isEmpty
-                                ? TerminalTheme.textDim
-                                : Color(red: 0.35, green: 0.88, blue: 0.48).opacity(0.85)
-                        )
-                        .lineLimit(nil)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
+                    if manager.logLines.isEmpty {
+                        Text("$ waiting for log output...")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(TerminalTheme.textDim)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(12)
+                    } else {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(manager.logLines) { line in
+                                Text(line.text)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundColor(Self.colorForLogLine(line.text))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .textSelection(.enabled)
+                            }
+                        }
                         .padding(12)
+                    }
 
                     Color.clear
                         .frame(height: 1)
                         .id("logEnd")
                 }
                 .background(TerminalTheme.bg)
-                .onChange(of: manager.logContents) { _ in
+                .onChange(of: manager.logLines.count) { _ in
                     if autoScroll {
                         withAnimation(.easeOut(duration: 0.1)) {
                             proxy.scrollTo("logEnd", anchor: .bottom)
@@ -862,6 +1026,29 @@ struct LogsTab: View {
         .background(TerminalTheme.bg)
         .onAppear { manager.startFastLogPolling() }
         .onDisappear { manager.stopFastLogPolling() }
+    }
+
+    private static let logDebug = Color(red: 0.55, green: 0.80, blue: 0.95)
+    private static let logInfo = Color(red: 0.35, green: 0.88, blue: 0.48).opacity(0.85)
+    private static let logWarn = Color(red: 0.90, green: 0.75, blue: 0.20)
+    private static let logError = Color(red: 0.95, green: 0.35, blue: 0.35)
+    private static let logFatal = Color(red: 0.75, green: 0.15, blue: 0.15)
+
+    private static func colorForLogLine(_ text: String) -> Color {
+        let prefix = text.prefix(120)
+        if prefix.contains("FATAL") || prefix.contains("F, [") {
+            return logFatal
+        }
+        if prefix.contains("ERROR") || prefix.contains("E, [") {
+            return logError
+        }
+        if prefix.contains("WARN") || prefix.contains("W, [") {
+            return logWarn
+        }
+        if prefix.contains("DEBUG") || prefix.contains("D, [") {
+            return logDebug
+        }
+        return logInfo
     }
 }
 

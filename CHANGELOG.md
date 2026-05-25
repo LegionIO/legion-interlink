@@ -1,5 +1,27 @@
 # Changelog
 
+## [2.2.5] - 2026-05-25
+
+### Fixed
+- **Log view 100% CPU after extended uptime** — Replaced single monolithic `Text` view with virtualized `LazyVStack` of individual log lines. The previous implementation rendered the entire log buffer as one attributed string on every update, causing CoreText to loop indefinitely encoding glyphs once the buffer grew large. (#74)
+- **Dashboard disappears when clicking another window** — Window now stays at `.floating` level so it remains on top like a menu bar popover.
+
+### Added
+- **Log level coloring** — Lines colored by severity: debug (light blue), info (green), warn (yellow), error (red), fatal (dark red). Parses both Ruby Logger and structured log formats.
+- **Extension catalog** — Extensions tab now shows available extensions organized into categories (Extensions, Extension Skills, Setup Packs) with install buttons that run `legion-gem install` or `legionio setup`.
+- **Line count indicator** — Logs toolbar shows current buffer line count.
+
+### Changed
+- **Updates use `legion-gem outdated` only** — Eliminated periodic `brew outdated` polling. Update detection is now gem-based; `brew upgrade` is only called when actually upgrading the legionio CLI binary.
+- **Updates tab reorganized** — Sections are now Core (legionio + legion-*), Extensions (lex-*), and Other.
+
+### Performance
+- **Log buffer is now an array of stable-ID lines** — Appending new log entries and trimming old ones no longer requires splitting/rejoining the entire string. The `LazyVStack` only renders lines visible in the scroll viewport.
+- **Reduced log buffer cap** — Max retained lines reduced from 4,000 to 2,000 (trimmed to 1,500 on overflow) since virtualization eliminates the rendering cost.
+- **Removed redundant log polling** — The 5-second timer no longer calls `refreshLogs()` unconditionally; log content is only populated when the Logs tab activates the live tail process.
+- **Stable line identifiers** — Each log line carries a monotonically increasing ID, so `ForEach` diffs efficiently when lines are trimmed from the front of the buffer.
+- **No more brew polling for updates** — `brew outdated` was slow (~2-4s) and ran every 30 minutes; replaced with `legion-gem outdated` which is sub-second.
+
 ## [2.2.4] - 2026-05-22
 
 ### Fixed

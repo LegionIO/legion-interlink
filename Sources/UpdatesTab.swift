@@ -131,20 +131,26 @@ struct UpdatesTab: View {
     private var updatesList: some View {
         ScrollView {
             VStack(spacing: 8) {
-                // Brew section
-                let brewItems = updateManager.items.filter { $0.source == .brew }
-                if !brewItems.isEmpty {
-                    sectionHeader("HOMEBREW", icon: "mug")
-                    ForEach(brewItems) { item in
+                let coreItems = updateManager.items.filter(\.isCoreLibrary)
+                if !coreItems.isEmpty {
+                    sectionHeader("CORE (legionio + legion-*)", icon: "cpu")
+                    ForEach(coreItems) { item in
                         updateCard(item)
                     }
                 }
 
-                // Gem section
-                let gemItems = updateManager.items.filter { $0.source == .gem }
-                if !gemItems.isEmpty {
-                    sectionHeader("GEMS (legion-gem)", icon: "shippingbox")
-                    ForEach(gemItems) { item in
+                let lexItems = updateManager.items.filter(\.isLex)
+                if !lexItems.isEmpty {
+                    sectionHeader("EXTENSIONS (lex-*)", icon: "puzzlepiece.extension")
+                    ForEach(lexItems) { item in
+                        updateCard(item)
+                    }
+                }
+
+                let otherItems = updateManager.items.filter { !$0.isCoreLibrary && !$0.isLex }
+                if !otherItems.isEmpty {
+                    sectionHeader("OTHER", icon: "shippingbox")
+                    ForEach(otherItems) { item in
                         updateCard(item)
                     }
                 }
@@ -198,8 +204,8 @@ struct UpdatesTab: View {
 
                 Spacer()
 
-                if item.source == .brew {
-                    Text("brew")
+                if item.isLegionio {
+                    Text("cli + gem")
                         .font(.system(size: 8, design: .monospaced))
                         .foregroundColor(TerminalTheme.textDim)
                         .padding(.horizontal, 5)
@@ -265,7 +271,7 @@ struct UpdatesTab: View {
             Text("Check for updates")
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundColor(TerminalTheme.textDim)
-            Text("Checks legionio (brew) and legion-*/lex-* gems")
+            Text("Checks legionio, legion-*, and lex-* gems for updates")
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundColor(TerminalTheme.textDim.opacity(0.4))
             Spacer()

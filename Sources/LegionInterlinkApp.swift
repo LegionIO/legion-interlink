@@ -177,10 +177,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
         window.center()
         window.isReleasedWhenClosed = false
         window.delegate = self
-        // Allow the window to receive focus even in accessory mode
         window.level = .floating
         window.makeKeyAndOrderFront(nil)
-        window.level = .normal
         NSApp.activate(ignoringOtherApps: true)
 
         statusWindow = window
@@ -221,10 +219,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
         window.contentView = hostingView
         window.center()
         window.isReleasedWhenClosed = false
-        // Allow focus in accessory mode
         window.level = .floating
         window.makeKeyAndOrderFront(nil)
-        window.level = .normal
         NSApp.activate(ignoringOtherApps: true)
 
         onboardingWindow = window
