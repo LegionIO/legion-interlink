@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import ServiceManagement
+import UserNotifications
 
 @main
 struct LegionInterlinkApp: App {
@@ -34,6 +35,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
     var statusWindow: NSWindow?
     var onboardingWindow: NSWindow?
     private var statusObservation: NSKeyValueObservation?
+    private let runningVersion: String = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
 
     private static let windowFrameKey = "StatusWindowFrame"
 
@@ -90,16 +92,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
     }
 
     @MainActor @objc private func statusItemClicked(_ sender: Any?) {
+        if checkForUpgradeAndRelaunch() { return }
+
         guard let event = NSApp.currentEvent else {
             showDashboard()
             return
         }
 
         if event.type == .rightMouseUp {
-            // Right-click: show context menu
             showContextMenu()
         } else {
-            // Left-click: open dashboard
             showDashboard()
         }
     }
@@ -153,6 +155,46 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
         }
     }
 
+    // MARK: - Upgrade Detection
+
+    /// Returns true (and triggers relaunch) if the on-disk version differs from the running version.
+    private func checkForUpgradeAndRelaunch() -> Bool {
+        guard !runningVersion.isEmpty else { return false }
+        let diskVersion = Self.diskVersion()
+        guard !diskVersion.isEmpty, diskVersion != runningVersion else { return false }
+
+        sendUpdateNotification()
+
+        let bundlePath = Bundle.main.bundlePath
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", "sleep 1 && open '\(bundlePath)'"]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try? process.run()
+
+        NSApplication.shared.terminate(nil)
+        return true
+    }
+
+    private static func diskVersion() -> String {
+        let cellarPath = "/opt/homebrew/Cellar/legion-interlink"
+        if let contents = try? FileManager.default.contentsOfDirectory(atPath: cellarPath) {
+            let versions = contents.filter { !$0.hasPrefix(".") }.sorted()
+            if let latest = versions.last { return latest }
+        }
+        return ""
+    }
+
+    private func sendUpdateNotification() {
+        guard Bundle.main.bundleIdentifier != nil else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "Legion Interlink"
+        content.body = "Restarting Legion Interlink for update."
+        let request = UNNotificationRequest(identifier: "upgrade-relaunch", content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request)
+    }
+
     // MARK: - Window Management
 
     @MainActor @objc func showDashboard() {
@@ -178,8 +220,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
         window.contentView = hostingView
         window.isReleasedWhenClosed = false
         window.delegate = self
-        window.level = .floating
-        window.hidesOnDeactivate = true
 
         if let frameString = UserDefaults.standard.string(forKey: Self.windowFrameKey) {
             window.setFrame(NSRectFromString(frameString), display: true)

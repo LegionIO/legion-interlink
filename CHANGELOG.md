@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.2.7] - 2026-05-26
+
+### Fixed
+- **Window not showing on click** — Removed `hidesOnDeactivate` and `.floating` window level that caused a race condition where clicking the menu bar icon would deactivate and hide the window before the click handler could show it.
+
+### Added
+- **Auto-relaunch after brew upgrade** — When the user clicks the menu bar icon and the on-disk version (from Homebrew Cellar) differs from the running version, the app posts a macOS notification and relaunches itself. Zero background polling — only checks on interaction.
+
 ## [2.2.6] - 2026-05-26
 
 ### Added
@@ -11,7 +19,7 @@
 ### Changed
 - **Default window size** — Increased from 700x550 to 900x600 for better content visibility across all tabs.
 - **Window frame persistence** — Size and position saved to UserDefaults on resize/move/close, restored on next open.
-- **Dismiss on focus loss** — Dashboard window hides when clicking away (`hidesOnDeactivate`); clicking the menu bar icon brings it back.
+- **Dismiss on focus loss** — _Reverted in 2.2.7_ (caused window to not show on click).
 
 ## [2.2.5] - 2026-05-25
 
