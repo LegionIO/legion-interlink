@@ -12,8 +12,16 @@ struct CatalogExtension: Identifiable {
     let id: String
     let name: String
     let category: ExtensionCategory
+    let isCoreDepedency: Bool
 
     var gemName: String { name }
+
+    init(id: String, name: String, category: ExtensionCategory, isCoreDepedency: Bool = false) {
+        self.id = id
+        self.name = name
+        self.category = category
+        self.isCoreDepedency = isCoreDepedency
+    }
 }
 
 struct SetupPack: Identifiable {
@@ -22,13 +30,23 @@ struct SetupPack: Identifiable {
     let description: String
 }
 
+private let coreGemPrefixes: [String] = [
+    "lex-agentic-",
+    "lex-llm",
+    "lex-identity-",
+]
+
+private func isCoreGem(_ name: String) -> Bool {
+    coreGemPrefixes.contains { name.hasPrefix($0) }
+}
+
 private let catalogExtensions: [CatalogExtension] = [
     CatalogExtension(id: "lex-exec", name: "lex-exec", category: .extensions),
     CatalogExtension(id: "lex-knowledge", name: "lex-knowledge", category: .extensions),
     CatalogExtension(id: "lex-apollo", name: "lex-apollo", category: .extensions),
     CatalogExtension(id: "lex-microsoft_teams", name: "lex-microsoft_teams", category: .extensions),
-    CatalogExtension(id: "lex-identity-system", name: "lex-identity-system", category: .extensions),
-    CatalogExtension(id: "lex-identity-github", name: "lex-identity-github", category: .extensions),
+    CatalogExtension(id: "lex-identity-system", name: "lex-identity-system", category: .extensions, isCoreDepedency: true),
+    CatalogExtension(id: "lex-identity-github", name: "lex-identity-github", category: .extensions, isCoreDepedency: true),
     CatalogExtension(id: "lex-developer", name: "lex-developer", category: .extensions),
     CatalogExtension(id: "lex-service_now", name: "lex-service_now", category: .extensions),
     CatalogExtension(id: "lex-github", name: "lex-github", category: .extensions),
@@ -59,6 +77,16 @@ private let setupPacks: [SetupPack] = [
     SetupPack(id: "vscode", command: "vscode", description: "Legion MCP server config for VS Code"),
 ]
 
+// MARK: - Installed Gem Info
+
+struct InstalledGem: Identifiable {
+    let id: String
+    let name: String
+    let version: String
+
+    var isCoreDepedency: Bool { isCoreGem(name) }
+}
+
 // MARK: - Extensions Tab
 
 struct ExtensionsTab: View {
@@ -66,8 +94,13 @@ struct ExtensionsTab: View {
     @State private var searchText = ""
     @State private var selectedCategory: ExtensionCategory = .extensions
     @State private var installingItems: Set<String> = []
+    @State private var uninstallingItems: Set<String> = []
     @State private var installedItems: Set<String> = []
     @State private var installOutput: [String: String] = [:]
+    @State private var installedGems: [InstalledGem] = []
+    @State private var installedGemNames: Set<String> = []
+    @State private var gemsLoaded = false
+    @State private var gemsLoading = false
 
     private var loadedExtensionNames: Set<String> {
         Set(cache.extensions.map(\.name))
@@ -96,6 +129,22 @@ struct ExtensionsTab: View {
         }
     }
 
+    private var filteredInstalledGems: [InstalledGem] {
+        let catalogNames = Set(catalogExtensions.filter { $0.category == selectedCategory }.map(\.name))
+        let gems = installedGems.filter { gem in
+            if selectedCategory == .skills {
+                return gem.name.hasPrefix("lex-skill-")
+            }
+            return gem.name.hasPrefix("lex-") && !gem.name.hasPrefix("lex-skill-")
+        }
+        .filter { !catalogNames.contains($0.name) || installedGemNames.contains($0.name) }
+        .filter { installedGemNames.contains($0.name) }
+
+        if searchText.isEmpty { return gems }
+        let q = searchText.lowercased()
+        return gems.filter { $0.name.lowercased().contains(q) }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -108,7 +157,10 @@ struct ExtensionsTab: View {
             }
         }
         .background(TerminalTheme.bg)
-        .task { await cache.loadExtensions() }
+        .task {
+            await cache.loadExtensions()
+            await loadInstalledGems()
+        }
     }
 
     // MARK: - Header
@@ -123,8 +175,18 @@ struct ExtensionsTab: View {
                 .font(.system(size: 10, weight: .bold, design: .monospaced))
                 .foregroundColor(TerminalTheme.textDim)
 
+            if !installedGems.isEmpty {
+                Text("\(installedGems.count) installed")
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundColor(TerminalTheme.accent)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(TerminalTheme.accent.opacity(0.1))
+                    .cornerRadius(3)
+            }
+
             if !cache.extensions.isEmpty {
-                Text("\(cache.extensions.count) loaded")
+                Text("\(cache.extensions.count) running")
                     .font(.system(size: 9, weight: .bold, design: .monospaced))
                     .foregroundColor(TerminalTheme.green)
                     .padding(.horizontal, 6)
@@ -137,7 +199,12 @@ struct ExtensionsTab: View {
 
             TerminalSearchBox(text: $searchText)
 
-            Button(action: { Task { await cache.loadExtensions(force: true) } }) {
+            Button(action: {
+                Task {
+                    await cache.loadExtensions(force: true)
+                    await loadInstalledGems(force: true)
+                }
+            }) {
                 HStack(spacing: 4) {
                     Image(systemName: "arrow.clockwise")
                         .font(.system(size: 10))
@@ -213,7 +280,17 @@ struct ExtensionsTab: View {
     private var extensionCatalogContent: some View {
         ScrollView {
             LazyVStack(spacing: 8) {
-                // Loaded from daemon (live)
+                if gemsLoading {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.mini).scaleEffect(0.7)
+                        Text("Loading installed gems...")
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundColor(TerminalTheme.textDim)
+                    }
+                    .padding(.top, 12)
+                }
+
+                // Running in daemon (live)
                 if !filteredLoaded.isEmpty {
                     sectionHeader("RUNNING", icon: "bolt.circle", color: TerminalTheme.green)
                     ForEach(filteredLoaded) { ext in
@@ -221,10 +298,21 @@ struct ExtensionsTab: View {
                     }
                 }
 
-                // Available to install
-                let available = filteredCatalog
+                // Installed but not in catalog (discovered via legion-gem list)
+                let installedOnly = filteredInstalledGems.filter { gem in
+                    !loadedExtensionNames.contains(gem.name)
+                }
+                if !installedOnly.isEmpty {
+                    sectionHeader("INSTALLED", icon: "checkmark.circle", color: TerminalTheme.accent)
+                    ForEach(installedOnly) { gem in
+                        installedGemCard(gem)
+                    }
+                }
+
+                // Available to install (not yet installed)
+                let available = filteredCatalog.filter { !installedGemNames.contains($0.name) }
                 if !available.isEmpty {
-                    sectionHeader("AVAILABLE", icon: "arrow.down.circle", color: TerminalTheme.accent)
+                    sectionHeader("AVAILABLE", icon: "arrow.down.circle", color: TerminalTheme.textDim)
                     ForEach(available) { ext in
                         catalogCard(ext)
                     }
@@ -343,10 +431,62 @@ struct ExtensionsTab: View {
         }
     }
 
+    // MARK: - Installed Gem Card
+
+    private func installedGemCard(_ gem: InstalledGem) -> some View {
+        let isUninstalling = uninstallingItems.contains(gem.id)
+
+        return HoverCard {
+            HStack(spacing: 10) {
+                Circle()
+                    .fill(TerminalTheme.accent)
+                    .frame(width: 7, height: 7)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(gem.name)
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundColor(TerminalTheme.text)
+
+                    Text("v\(gem.version)")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(TerminalTheme.accent.opacity(0.7))
+                }
+
+                Spacer()
+
+                if gem.isCoreDepedency {
+                    Text("core")
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .foregroundColor(TerminalTheme.textDim)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(TerminalTheme.textDim.opacity(0.1))
+                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(TerminalTheme.textDim.opacity(0.2), lineWidth: 1))
+                        .cornerRadius(4)
+                } else if isUninstalling {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .scaleEffect(0.7)
+                } else {
+                    Text("installed")
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .foregroundColor(TerminalTheme.green)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(TerminalTheme.green.opacity(0.1))
+                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(TerminalTheme.green.opacity(0.3), lineWidth: 1))
+                        .cornerRadius(4)
+                }
+            }
+            .padding(10)
+        }
+    }
+
     // MARK: - Catalog Card
 
     private func catalogCard(_ ext: CatalogExtension) -> some View {
         let isLoaded = loadedExtensionNames.contains(ext.name)
+        let isInstalled = installedGemNames.contains(ext.name)
         let isInstalling = installingItems.contains(ext.id)
         let justInstalled = installedItems.contains(ext.id)
 
@@ -354,7 +494,7 @@ struct ExtensionsTab: View {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 10) {
                     Circle()
-                        .fill(isLoaded ? TerminalTheme.green : justInstalled ? TerminalTheme.yellow : TerminalTheme.gray)
+                        .fill(isLoaded ? TerminalTheme.green : isInstalled ? TerminalTheme.accent : justInstalled ? TerminalTheme.yellow : TerminalTheme.gray)
                         .frame(width: 7, height: 7)
 
                     Text(ext.name)
@@ -364,13 +504,22 @@ struct ExtensionsTab: View {
                     Spacer()
 
                     if isLoaded {
-                        Text("loaded")
+                        Text("running")
                             .font(.system(size: 9, weight: .semibold, design: .monospaced))
                             .foregroundColor(TerminalTheme.green)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 3)
                             .background(TerminalTheme.green.opacity(0.1))
                             .overlay(RoundedRectangle(cornerRadius: 4).stroke(TerminalTheme.green.opacity(0.3), lineWidth: 1))
+                            .cornerRadius(4)
+                    } else if isInstalled {
+                        Text("installed")
+                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                            .foregroundColor(TerminalTheme.accent)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(TerminalTheme.accent.opacity(0.1))
+                            .overlay(RoundedRectangle(cornerRadius: 4).stroke(TerminalTheme.accent.opacity(0.3), lineWidth: 1))
                             .cornerRadius(4)
                     } else if isInstalling {
                         ProgressView()
@@ -488,11 +637,12 @@ struct ExtensionsTab: View {
         let legionGem = Self.resolvedLegionGemPath
 
         Task.detached {
-            let (output, success) = await Self.runInstall(legionGem, arguments: ["install", ext.gemName])
+            let (output, success) = await Self.runCommand(legionGem, arguments: ["install", ext.gemName])
             await MainActor.run {
                 installingItems.remove(ext.id)
                 if success {
                     installedItems.insert(ext.id)
+                    installedGemNames.insert(ext.name)
                 }
                 installOutput[ext.id] = output
             }
@@ -504,7 +654,7 @@ struct ExtensionsTab: View {
         let legionioPath = Self.resolvedLegionioPath
 
         Task.detached {
-            let (output, success) = await Self.runInstall(legionioPath, arguments: ["setup", pack.command])
+            let (output, success) = await Self.runCommand(legionioPath, arguments: ["setup", pack.command])
             await MainActor.run {
                 installingItems.remove(pack.id)
                 if success {
@@ -513,6 +663,50 @@ struct ExtensionsTab: View {
                 installOutput[pack.id] = output
             }
         }
+    }
+
+    // MARK: - Load Installed Gems
+
+    private func loadInstalledGems(force: Bool = false) async {
+        guard !gemsLoading else { return }
+        guard force || !gemsLoaded else { return }
+
+        gemsLoading = true
+        let legionGem = Self.resolvedLegionGemPath
+
+        let gems = await Task.detached { () -> [InstalledGem] in
+            let process = Process()
+            let pipe = Pipe()
+            process.executableURL = URL(fileURLWithPath: legionGem)
+            process.arguments = ["list"]
+            process.standardOutput = pipe
+            process.standardError = pipe
+
+            do {
+                try process.run()
+                process.waitUntilExit()
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                let output = String(data: data, encoding: .utf8) ?? ""
+
+                return output.components(separatedBy: "\n").compactMap { line -> InstalledGem? in
+                    let trimmed = line.trimmingCharacters(in: .whitespaces)
+                    guard trimmed.hasPrefix("lex-") else { return nil }
+                    // Format: "lex-name (1.2.3)"
+                    let parts = trimmed.components(separatedBy: " (")
+                    guard parts.count == 2 else { return nil }
+                    let name = parts[0]
+                    let version = parts[1].replacingOccurrences(of: ")", with: "")
+                    return InstalledGem(id: name, name: name, version: version)
+                }
+            } catch {
+                return []
+            }
+        }.value
+
+        installedGems = gems
+        installedGemNames = Set(gems.map(\.name))
+        gemsLoaded = true
+        gemsLoading = false
     }
 
     // MARK: - Process Helpers
@@ -531,7 +725,7 @@ struct ExtensionsTab: View {
         return "/usr/local/bin/legionio"
     }()
 
-    private nonisolated static func runInstall(_ executable: String, arguments: [String]) async -> (output: String, success: Bool) {
+    private nonisolated static func runCommand(_ executable: String, arguments: [String]) async -> (output: String, success: Bool) {
         let process = Process()
         let pipe = Pipe()
         process.executableURL = URL(fileURLWithPath: executable)
