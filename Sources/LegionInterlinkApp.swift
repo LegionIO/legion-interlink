@@ -35,6 +35,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
     var onboardingWindow: NSWindow?
     private var statusObservation: NSKeyValueObservation?
 
+    private static let windowFrameKey = "StatusWindowFrame"
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Menu bar only — hide from Dock
         NSApplication.shared.setActivationPolicy(.accessory)
@@ -165,7 +167,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
         let hostingView = NSHostingView(rootView: contentView)
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 700, height: 550),
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -174,10 +176,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.contentView = hostingView
-        window.center()
         window.isReleasedWhenClosed = false
         window.delegate = self
         window.level = .floating
+        window.hidesOnDeactivate = true
+
+        if let frameString = UserDefaults.standard.string(forKey: Self.windowFrameKey) {
+            window.setFrame(NSRectFromString(frameString), display: true)
+        } else {
+            window.center()
+        }
+
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
 
@@ -187,10 +196,28 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
     func windowWillClose(_ notification: Notification) {
         guard let closingWindow = notification.object as? NSWindow else { return }
         if closingWindow === statusWindow {
+            saveWindowFrame()
             statusWindow = nil
         } else if closingWindow === onboardingWindow {
             onboardingWindow = nil
         }
+    }
+
+    func windowDidResize(_ notification: Notification) {
+        guard let resizedWindow = notification.object as? NSWindow,
+              resizedWindow === statusWindow else { return }
+        saveWindowFrame()
+    }
+
+    func windowDidMove(_ notification: Notification) {
+        guard let movedWindow = notification.object as? NSWindow,
+              movedWindow === statusWindow else { return }
+        saveWindowFrame()
+    }
+
+    private func saveWindowFrame() {
+        guard let window = statusWindow else { return }
+        UserDefaults.standard.set(NSStringFromRect(window.frame), forKey: Self.windowFrameKey)
     }
 
     @MainActor func showOnboarding() {
