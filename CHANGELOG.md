@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.2.6] - 2026-05-26
+
+### Added
+- **Installed gems detection** — Extensions tab runs `legion-gem list` (cached, refreshed on demand) to show which lex-* gems are installed locally, separate from what the daemon reports as running.
+- **Three-section extensions layout** — Running (live in daemon), Installed (on disk but not running), and Available (not yet installed).
+- **Core dependency badge** — Gems matching `lex-agentic-*`, `lex-llm*`, `lex-identity-*` display a "core" badge and cannot be uninstalled.
+- **Installed + running counts** — Header shows both "X installed" and "Y running" badges.
+
+### Changed
+- **Default window size** — Increased from 700x550 to 900x600 for better content visibility across all tabs.
+- **Window frame persistence** — Size and position saved to UserDefaults on resize/move/close, restored on next open.
+- **Dismiss on focus loss** — Dashboard window hides when clicking away (`hidesOnDeactivate`); clicking the menu bar icon brings it back.
+
 ## [2.2.5] - 2026-05-25
 
 ### Fixed
