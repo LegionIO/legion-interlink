@@ -90,6 +90,18 @@ class ServiceManager: ObservableObject {
     /// Cleared after the transition completes. External changes (not in this set) trigger a macOS notification.
     private var userInitiatedTransitions: Set<ServiceName> = []
 
+    /// Whether the dashboard window is currently visible (key or on-screen).
+    /// Polling frequency adapts: 10s when visible, 60s when backgrounded.
+    var windowVisible: Bool = false {
+        didSet {
+            guard oldValue != windowVisible else { return }
+            restartPollingTimer()
+        }
+    }
+
+    private static let foregroundPollInterval: TimeInterval = 10
+    private static let backgroundPollInterval: TimeInterval = 60
+
     nonisolated static let daemonPort = 4567
     private let daemonHealthURL = URL(string: "http://localhost:\(daemonPort)/api/ready")!
     private let logPath: String
@@ -246,28 +258,24 @@ class ServiceManager: ObservableObject {
     func checkAllServices() async {
         let brew = resolvedBrewPath
 
-        // Run all health checks concurrently off the main thread
-        async let redisResult = Self.checkBrewService(brew: brew, name: ServiceName.redis.brewName)
-        async let memcachedResult = Self.checkBrewService(brew: brew, name: ServiceName.memcached.brewName)
-        async let ollamaResult = Self.checkBrewService(brew: brew, name: ServiceName.ollama.brewName)
-        async let legionioResult = Self.checkBrewService(brew: brew, name: ServiceName.legionio.brewName)
+        // Single brew invocation for all services instead of 4 separate process spawns
+        async let allServicesResult = Self.checkAllBrewServices(brew: brew)
         async let daemonHealthResult = Self.checkDaemonHealth(url: daemonHealthURL)
 
-        let redis = await redisResult
-        let memcached = await memcachedResult
-        let ollama = await ollamaResult
-        let legionio = await legionioResult
+        let serviceMap = await allServicesResult
         let daemonHealth = await daemonHealthResult
 
         // Update UI on main actor — skip services in transition states
-        updateServiceIfStable(.redis, redis.running ? .running : .stopped, pid: redis.pid)
-        updateServiceIfStable(.memcached, memcached.running ? .running : .stopped, pid: memcached.pid)
-        updateServiceIfStable(.ollama, ollama.running ? .running : .stopped, pid: ollama.pid)
-
-        // LegionIO requires both brew service running AND /api/ready responding
-        daemonReadiness = daemonHealth.readiness
-        let daemonOnline = legionio.running && daemonHealth.responding
-        updateServiceIfStable(.legionio, daemonOnline ? .running : .stopped, pid: legionio.pid)
+        for service in ServiceName.allCases {
+            let result = serviceMap[service.brewName] ?? (running: false, pid: nil)
+            if service == .legionio {
+                daemonReadiness = daemonHealth.readiness
+                let daemonOnline = result.running && daemonHealth.responding
+                updateServiceIfStable(.legionio, daemonOnline ? .running : .stopped, pid: result.pid)
+            } else {
+                updateServiceIfStable(service, result.running ? .running : .stopped, pid: result.pid)
+            }
+        }
 
         lastChecked = Date()
         recalculateOverallStatus()
@@ -538,7 +546,39 @@ class ServiceManager: ObservableObject {
         return env
     }
 
-    /// Check a brew service status. Runs entirely off main thread.
+    /// Check all brew services in a single process invocation. Returns a map of service name -> status.
+    private nonisolated static func checkAllBrewServices(brew: String) async -> [String: (running: Bool, pid: Int?)] {
+        let process = Process()
+        let pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: brew)
+        process.arguments = ["services", "list", "--json"]
+        process.environment = brewEnvironment
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return [:]
+        }
+
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            return [:]
+        }
+
+        var result: [String: (running: Bool, pid: Int?)] = [:]
+        for entry in json {
+            guard let name = entry["name"] as? String else { continue }
+            let running = entry["running"] as? Bool ?? (entry["status"] as? String == "started")
+            let pid = entry["pid"] as? Int
+            result[name] = (running: running, pid: pid)
+        }
+        return result
+    }
+
+    /// Check a single brew service status (used during start/stop transitions).
     private nonisolated static func checkBrewService(brew: String, name: String) async -> (running: Bool, pid: Int?) {
         let process = Process()
         let pipe = Pipe()
@@ -685,7 +725,13 @@ class ServiceManager: ObservableObject {
 
     private func startPolling() {
         Task { await checkAllServices() }
-        timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+        restartPollingTimer()
+    }
+
+    private func restartPollingTimer() {
+        timer?.invalidate()
+        let interval = windowVisible ? Self.foregroundPollInterval : Self.backgroundPollInterval
+        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             guard let self else { return }
             Task { @MainActor in
                 if !self.suppressPolling {
