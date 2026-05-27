@@ -38,16 +38,20 @@ The icon shows a Legion network grid with a colored status badge:
 
 ## Dashboard
 
-A native window with seven tabs:
+A native window with eleven tabs:
 
 | Tab        | Shows                                                        |
 |------------|--------------------------------------------------------------|
 | Services   | Per-service cards with start/stop, daemon component readiness |
 | Logs       | Live daemon log viewer with auto-scroll and clear            |
 | Identity   | Current session identity and auth provider status            |
-| LLM        | Registered LLM providers and available models                |
-| Extensions | Loaded LEX extensions with runners and state                 |
+| LLM        | LLM configuration and model routing settings                 |
+| Providers  | Registered LLM providers with model details                  |
+| GAIA       | Cognitive coordination engine status                         |
+| MCP        | Model Context Protocol server connections                    |
+| Extensions | Installed/running LEX extensions with install/uninstall      |
 | Workers    | Active worker actors with task counts                        |
+| Updates    | Gem version checker with auto-update for lex-* extensions    |
 | Settings   | Daemon settings browser (read from `~/.legionio/settings/`)  |
 
 ## First Launch (Onboarding)
@@ -71,6 +75,14 @@ Progress and output stream in real time.
 | Redis      | `brew services info redis --json`            | 5s       |
 | Memcached  | `brew services info memcached --json`        | 5s       |
 | Ollama     | `brew services info ollama --json`           | 5s       |
+
+## Notifications
+
+Legion Interlink sends macOS notifications for:
+
+- **External state changes** — when a service starts or stops outside of Interlink (e.g. via `brew services` CLI or a crash). Actions triggered from within the Interlink UI do not fire notifications.
+- **Updates available** — when new versions of legionio or core libraries are detected.
+- **Upgrade relaunch** — when a `brew upgrade` installs a newer binary and Interlink restarts itself.
 
 ## Development
 

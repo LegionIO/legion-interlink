@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UserNotifications
 
 // MARK: - Service Definitions
 
@@ -85,6 +86,10 @@ class ServiceManager: ObservableObject {
     /// When true, background polling skips checkAllServices to avoid overwriting transition states.
     private var suppressPolling = false
 
+    /// Tracks services whose state change was initiated by the user within Interlink.
+    /// Cleared after the transition completes. External changes (not in this set) trigger a macOS notification.
+    private var userInitiatedTransitions: Set<ServiceName> = []
+
     nonisolated static let daemonPort = 4567
     private let daemonHealthURL = URL(string: "http://localhost:\(daemonPort)/api/ready")!
     private let logPath: String
@@ -166,6 +171,7 @@ class ServiceManager: ObservableObject {
 
     func startService(_ service: ServiceName) {
         updateServiceStatus(service, .starting)
+        userInitiatedTransitions.insert(service)
         suppressPolling = true
         let brew = resolvedBrewPath
         let name = service.brewName
@@ -178,6 +184,7 @@ class ServiceManager: ObservableObject {
                 await Self.waitForDaemonReady(url: healthURL, timeout: 120)
             }
             await MainActor.run {
+                self.userInitiatedTransitions.remove(service)
                 self.updateServiceStatus(service, .running)
                 self.suppressPolling = false
                 self.recalculateOverallStatus()
@@ -187,6 +194,7 @@ class ServiceManager: ObservableObject {
 
     func stopService(_ service: ServiceName) {
         updateServiceStatus(service, .stopping)
+        userInitiatedTransitions.insert(service)
         if service == .legionio {
             daemonReadiness = DaemonReadiness()
         }
@@ -202,6 +210,7 @@ class ServiceManager: ObservableObject {
             // Wait until health check confirms the service is actually down
             await Self.waitForServiceReady(service: service, brew: brew, target: false, timeout: 60)
             await MainActor.run {
+                self.userInitiatedTransitions.remove(service)
                 self.updateServiceStatus(service, .stopped)
                 self.suppressPolling = false
                 self.recalculateOverallStatus()
@@ -211,6 +220,7 @@ class ServiceManager: ObservableObject {
 
     func restartService(_ service: ServiceName) {
         updateServiceStatus(service, .stopping)
+        userInitiatedTransitions.insert(service)
         suppressPolling = true
         let brew = resolvedBrewPath
         let name = service.brewName
@@ -223,6 +233,7 @@ class ServiceManager: ObservableObject {
                 await Self.waitForDaemonReady(url: healthURL, timeout: 120)
             }
             await MainActor.run {
+                self.userInitiatedTransitions.remove(service)
                 self.updateServiceStatus(service, .running)
                 self.suppressPolling = false
                 self.recalculateOverallStatus()
@@ -610,12 +621,19 @@ class ServiceManager: ObservableObject {
 
     /// Like updateServiceStatus, but skips if the service is in a transition state (.stopping/.starting).
     /// This prevents health-check results from flickering the UI during start/stop operations.
+    /// Sends a macOS notification if the state changed externally (not initiated by Interlink).
     private func updateServiceIfStable(_ service: ServiceName, _ status: ServiceStatus, pid: Int? = nil) {
         if let idx = services.firstIndex(where: { $0.name == service }) {
             let current = services[idx].status
             if current == .stopping || current == .starting {
                 return  // Don't overwrite transition states
             }
+
+            let stateChanged = current != status && current != .unknown
+            if stateChanged && !userInitiatedTransitions.contains(service) {
+                sendExternalStateNotification(service: service, newStatus: status)
+            }
+
             services[idx].status = status
             if let pid {
                 services[idx].pid = pid
@@ -623,6 +641,30 @@ class ServiceManager: ObservableObject {
                 services[idx].pid = nil
             }
         }
+    }
+
+    // MARK: - External State Notifications
+
+    private func sendExternalStateNotification(service: ServiceName, newStatus: ServiceStatus) {
+        guard Bundle.main.bundleIdentifier != nil else { return }
+
+        let content = UNMutableNotificationContent()
+        content.title = "Legion Interlink"
+        switch newStatus {
+        case .running:
+            content.body = "\(service.displayName) was started externally."
+        case .stopped:
+            content.body = "\(service.displayName) has stopped."
+        default:
+            return
+        }
+
+        let request = UNNotificationRequest(
+            identifier: "external-\(service.rawValue)-\(UUID().uuidString)",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request)
     }
 
     private func recalculateOverallStatus() {
