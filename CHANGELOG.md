@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.2.8] - 2026-05-26
+
+### Added
+- **External state change notifications** — macOS notifications fire when a service starts or stops outside of Interlink (e.g. via `brew services` CLI or a crash). Actions triggered from within the Interlink UI do not produce notifications.
+
+### Changed
+- **README updated** — Dashboard tabs table expanded from 7 to 11 reflecting current UI (Providers, GAIA, MCP, Updates). Added Notifications section.
+- **CLAUDE.md rules** — Codified `legion-gem`-only rule and notification behavior for future contributors.
+
 ## [2.2.7] - 2026-05-26
 
 ### Fixed

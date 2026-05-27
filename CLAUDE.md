@@ -87,3 +87,5 @@ PRs must bump `VERSION` and update `CHANGELOG.md`.
 - Never block the UI — all `Process` execution happens in `Task.detached` or `nonisolated` methods.
 - The app must survive daemon being unreachable — all API calls handle connection-refused gracefully.
 - Menu bar icon must always reflect current `OverallStatus` (polled every 1s via Timer).
+- **Never call bare `gem`** — always use `legion-gem` (a bundled Ruby env specific to LegionIO). Resolved paths: `/opt/homebrew/bin/legion-gem` or `/usr/local/bin/legion-gem`.
+- **Notifications for external state changes only** — send a macOS notification when a service starts/stops outside of Interlink. Never notify for user-initiated actions (start/stop/restart clicked in the UI).
