@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Combine
 import ServiceManagement
 import UserNotifications
 
@@ -34,7 +35,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
     var statusItem: NSStatusItem?
     var statusWindow: NSWindow?
     var onboardingWindow: NSWindow?
-    private var statusObservation: NSKeyValueObservation?
+    private var statusObservation: AnyCancellable?
     private let runningVersion: String = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
 
     private static let windowFrameKey = "StatusWindowFrame"
@@ -71,7 +72,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
 
     // MARK: - Status Item
 
-    private func setupStatusItem() {
+    @MainActor private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
 
         if let button = statusItem?.button {
@@ -81,14 +82,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
 
-        // Observe status changes to update the icon
-        // Poll every second on main run loop
-        Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
+        // React to status changes via Combine instead of polling every 1s
+        let manager = ServiceManager.shared
+        statusObservation = manager.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
                 guard let self else { return }
-                self.statusItem?.button?.image = self.menuBarIcon(for: ServiceManager.shared.overallStatus)
+                MainActor.assumeIsolated {
+                    self.statusItem?.button?.image = self.menuBarIcon(for: ServiceManager.shared.overallStatus)
+                }
             }
-        }
     }
 
     @MainActor @objc private func statusItemClicked(_ sender: Any?) {
@@ -231,6 +234,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
         NSApp.activate(ignoringOtherApps: true)
 
         statusWindow = window
+        ServiceManager.shared.windowVisible = true
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -238,9 +242,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
         if closingWindow === statusWindow {
             saveWindowFrame()
             statusWindow = nil
+            ServiceManager.shared.windowVisible = false
         } else if closingWindow === onboardingWindow {
             onboardingWindow = nil
         }
+    }
+
+    func windowDidBecomeKey(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow,
+              window === statusWindow else { return }
+        ServiceManager.shared.windowVisible = true
+    }
+
+    func windowDidResignKey(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow,
+              window === statusWindow else { return }
+        ServiceManager.shared.windowVisible = false
     }
 
     func windowDidResize(_ notification: Notification) {

@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.9] - 2026-05-27
+
+### Fixed
+- **Idle CPU reduced from ~18% to near-zero** — Replaced 4 separate `brew services info` subprocess spawns (every 5s) with a single `brew services list --json` call. Polling interval now adapts: 10s when the dashboard window is focused, 60s when backgrounded or closed.
+- **Menu bar icon no longer polls every 1s** — Replaced `Timer` with Combine subscription that only updates the icon when overall status actually changes.
+- **Animations pause when window is unfocused** — `BreathingStatusPill`, `PulsingDot`, and `PulsingStatusText` all stop their infinite animations when the window loses key status, eliminating continuous Metal/GPU compositing behind other apps.
+
 ## [2.2.8] - 2026-05-26
 
 ### Added

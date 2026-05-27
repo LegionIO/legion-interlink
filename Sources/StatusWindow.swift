@@ -53,11 +53,17 @@ struct HoverCard<Content: View>: View {
 // MARK: - Breathing Status Pill
 
 /// A status pill with a subtle breathing glow animation when online.
+/// Animation pauses when the window loses focus to avoid GPU compositing overhead.
 private struct BreathingStatusPill: View {
     let color: Color
     let text: String
     let isOnline: Bool
+    @Environment(\.controlActiveState) private var controlActiveState
     @State private var breathe = false
+
+    private var shouldAnimate: Bool {
+        isOnline && controlActiveState == .key
+    }
 
     var body: some View {
         HStack(spacing: 5) {
@@ -78,14 +84,12 @@ private struct BreathingStatusPill: View {
                 .stroke(color.opacity(0.3), lineWidth: 1)
         )
         .cornerRadius(4)
-        .animation(.easeInOut(duration: 2.0).repeatForever(autoreverses: true), value: breathe)
+        .animation(shouldAnimate ? .easeInOut(duration: 2.0).repeatForever(autoreverses: true) : .default, value: breathe)
         .onAppear {
-            if isOnline { breathe = true }
+            if shouldAnimate { breathe = true }
         }
-        .onChange(of: isOnline) { online in
-            withAnimation(.easeInOut(duration: 0.3)) {
-                breathe = online
-            }
+        .onChange(of: shouldAnimate) { animate in
+            breathe = animate
         }
     }
 }
@@ -94,12 +98,17 @@ private struct BreathingStatusPill: View {
 
 private struct PulsingStatusText: View {
     let status: ServiceStatus
+    @Environment(\.controlActiveState) private var controlActiveState
     @State private var pulse = false
     @State private var elapsedSeconds = 0
     @State private var elapsedTimer: Timer?
 
     private var isTransitioning: Bool {
         status == .starting || status == .stopping
+    }
+
+    private var shouldAnimate: Bool {
+        isTransitioning && controlActiveState == .key
     }
 
     private var color: Color {
@@ -125,32 +134,36 @@ private struct PulsingStatusText: View {
                     .foregroundColor(color.opacity(0.6))
             }
         }
+        .animation(shouldAnimate ? .easeInOut(duration: 0.6).repeatForever(autoreverses: true) : .default, value: pulse)
         .onAppear {
-            if isTransitioning {
+            if shouldAnimate {
                 startTimer()
-                withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
-                    pulse = true
-                }
+                pulse = true
             }
         }
         .onDisappear {
             stopTimer()
+        }
+        .onChange(of: shouldAnimate) { animate in
+            if animate {
+                startTimer()
+                pulse = true
+            } else if !isTransitioning {
+                stopTimer()
+                elapsedSeconds = 0
+                pulse = false
+            }
         }
         .onChange(of: status) { newStatus in
             let transitioning = newStatus == .starting || newStatus == .stopping
             if transitioning {
                 elapsedSeconds = 0
                 startTimer()
-                pulse = false
-                withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
-                    pulse = true
-                }
+                pulse = true
             } else {
                 stopTimer()
                 elapsedSeconds = 0
-                withAnimation(.default) {
-                    pulse = false
-                }
+                pulse = false
             }
         }
     }
@@ -173,7 +186,12 @@ private struct PulsingStatusText: View {
 private struct PulsingDot: View {
     let color: Color
     let isTransitioning: Bool
+    @Environment(\.controlActiveState) private var controlActiveState
     @State private var pulse = false
+
+    private var shouldPulse: Bool {
+        isTransitioning && controlActiveState == .key
+    }
 
     var body: some View {
         ZStack {
@@ -186,24 +204,12 @@ private struct PulsingDot: View {
                 .shadow(color: color.opacity(pulse ? 0.9 : 0.5), radius: pulse ? 8 : 4)
         }
         .opacity(isTransitioning && pulse ? 0.5 : 1.0)
+        .animation(shouldPulse ? .easeInOut(duration: 0.8).repeatForever(autoreverses: true) : .default, value: pulse)
         .onAppear {
-            if isTransitioning {
-                withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
-                    pulse = true
-                }
-            }
+            if shouldPulse { pulse = true }
         }
-        .onChange(of: isTransitioning) { transitioning in
-            if transitioning {
-                pulse = false
-                withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
-                    pulse = true
-                }
-            } else {
-                withAnimation(.easeInOut(duration: 0.3)) {
-                    pulse = false
-                }
-            }
+        .onChange(of: shouldPulse) { active in
+            pulse = active
         }
     }
 }
