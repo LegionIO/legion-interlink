@@ -802,18 +802,26 @@ enum ClientConfigManager {
         let path = claudeSettingsPath
         let backupPath = claudeSettingsBackupPath
 
-        // Only back up once per session (don't overwrite an existing backup)
-        if !fm.fileExists(atPath: backupPath) {
-            if fm.fileExists(atPath: path) {
-                try? fm.copyItem(atPath: path, toPath: backupPath)
-            }
-        }
-
         // Read existing JSON (start from empty dict if the file doesn't exist)
         var json: [String: Any] = [:]
         if let data = fm.contents(atPath: path),
            let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             json = parsed
+        }
+
+        // Write a sanitised backup — strip ANTHROPIC_AUTH_TOKEN so it's never preserved
+        if !fm.fileExists(atPath: backupPath) {
+            var backupJson = json
+            if var backupEnv = backupJson["env"] as? [String: Any] {
+                backupEnv.removeValue(forKey: "ANTHROPIC_AUTH_TOKEN")
+                backupJson["env"] = backupEnv
+            }
+            if let backupData = try? JSONSerialization.data(
+                withJSONObject: backupJson,
+                options: [.prettyPrinted, .sortedKeys]
+            ) {
+                fm.createFile(atPath: backupPath, contents: backupData)
+            }
         }
 
         // Patch env.ANTHROPIC_BASE_URL
