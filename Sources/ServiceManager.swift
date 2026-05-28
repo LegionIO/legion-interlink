@@ -809,24 +809,21 @@ enum ClientConfigManager {
             json = parsed
         }
 
-        // Write a sanitised backup — strip ANTHROPIC_AUTH_TOKEN so it's never preserved
+        // Write a faithful backup of the original — token included — so it can be fully restored
         if !fm.fileExists(atPath: backupPath) {
-            var backupJson = json
-            if var backupEnv = backupJson["env"] as? [String: Any] {
-                backupEnv.removeValue(forKey: "ANTHROPIC_AUTH_TOKEN")
-                backupJson["env"] = backupEnv
-            }
             if let backupData = try? JSONSerialization.data(
-                withJSONObject: backupJson,
+                withJSONObject: json,
                 options: [.prettyPrinted, .sortedKeys]
             ) {
                 fm.createFile(atPath: backupPath, contents: backupData)
             }
         }
 
-        // Patch env.ANTHROPIC_BASE_URL
+        // Patch env: set ANTHROPIC_BASE_URL and strip ANTHROPIC_AUTH_TOKEN
+        // so the token is never sent to the LegionIO proxy
         var env = json["env"] as? [String: Any] ?? [:]
         env["ANTHROPIC_BASE_URL"] = daemonInferenceURL
+        env.removeValue(forKey: "ANTHROPIC_AUTH_TOKEN")
         json["env"] = env
 
         guard let data = try? JSONSerialization.data(
