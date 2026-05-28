@@ -6,9 +6,9 @@ import AppKit
 struct ClientsTab: View {
     @EnvironmentObject var manager: ServiceManager
 
-    // Per-client routing toggle — starts off; user opts in manually
-    @State private var claudeRoutingEnabled: Bool = false
-    @State private var codexRoutingEnabled: Bool = false
+    // Per-client routing toggle — persisted across restarts via UserDefaults
+    @AppStorage("clientRouting.claude") private var claudeRoutingEnabled: Bool = false
+    @AppStorage("clientRouting.codex") private var codexRoutingEnabled: Bool = false
 
     // Install state only — no running state tracked
     @State private var claudeInstalled: Bool = false
