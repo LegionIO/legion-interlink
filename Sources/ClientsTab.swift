@@ -6,9 +6,9 @@ import AppKit
 struct ClientsTab: View {
     @EnvironmentObject var manager: ServiceManager
 
-    // Per-client routing toggle — persisted across restarts via UserDefaults
-    @AppStorage("clientRouting.claude") private var claudeRoutingEnabled: Bool = false
-    @AppStorage("clientRouting.codex") private var codexRoutingEnabled: Bool = false
+    // Per-client routing toggle — persisted to ~/.legionio/settings/interlink.json
+    @State private var claudeRoutingEnabled: Bool = false
+    @State private var codexRoutingEnabled: Bool = false
 
     // Install state only — no running state tracked
     @State private var claudeInstalled: Bool = false
@@ -33,14 +33,16 @@ struct ClientsTab: View {
             }
         }
         .background(TerminalTheme.bg)
-        .task { detectClients() }
+        .task { detectClients(); loadRoutingState() }
         .onChange(of: claudeRoutingEnabled) { enabled in
+            saveRoutingState()
             Task.detached {
                 if enabled { ClientConfigManager.applyClaudeConfig() }
                 else { ClientConfigManager.restoreClaudeConfig() }
             }
         }
         .onChange(of: codexRoutingEnabled) { enabled in
+            saveRoutingState()
             Task.detached {
                 if enabled { ClientConfigManager.applyCodexConfig() }
                 else { ClientConfigManager.restoreCodexConfig() }
@@ -296,6 +298,21 @@ struct ClientsTab: View {
                 .stroke(TerminalTheme.green.opacity(0.2), lineWidth: 1)
         )
         .cornerRadius(3)
+    }
+
+    // MARK: - Routing State Persistence (~/.legionio/settings/interlink.json)
+
+    private func loadRoutingState() {
+        guard let json = SettingsFile.read("interlink") else { return }
+        if let claude = json["clientRouting.claude"] as? Bool { claudeRoutingEnabled = claude }
+        if let codex  = json["clientRouting.codex"]  as? Bool { codexRoutingEnabled  = codex  }
+    }
+
+    private func saveRoutingState() {
+        var json = SettingsFile.read("interlink") ?? [:]
+        json["clientRouting.claude"] = claudeRoutingEnabled
+        json["clientRouting.codex"]  = codexRoutingEnabled
+        _ = SettingsFile.write("interlink", content: json)
     }
 
     // MARK: - Helpers
