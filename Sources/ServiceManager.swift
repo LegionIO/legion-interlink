@@ -813,7 +813,7 @@ enum ClientConfigManager {
         if !fm.fileExists(atPath: backupPath) {
             if let backupData = try? JSONSerialization.data(
                 withJSONObject: json,
-                options: [.prettyPrinted, .sortedKeys]
+                options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
             ) {
                 fm.createFile(atPath: backupPath, contents: backupData)
             }
@@ -828,7 +828,7 @@ enum ClientConfigManager {
 
         guard let data = try? JSONSerialization.data(
             withJSONObject: json,
-            options: [.prettyPrinted, .sortedKeys]
+            options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         ) else { return }
 
         // Create parent directory if needed
