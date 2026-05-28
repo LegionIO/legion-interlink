@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.3.0] - 2026-05-28
+
+### Added
+- **Clients tab** — New first tab listing Claude Code, Codex, and Kai with install status, per-client LegionIO ↔ native routing toggle, and one-click open buttons. Claude Code launches a new Terminal window with `claude` pre-typed. Codex and Kai open as desktop apps.
+- **ClientConfigManager** — Patches `~/.claude/settings.json` (`env.ANTHROPIC_BASE_URL`) and `~/.codex/config.toml` (`[model_providers.legionio]`) when routing is enabled per-client. Backs up originals and restores on toggle-off. All file I/O is off the main thread.
+- **Kai removed from Services tab** — Kai is now exclusively managed from the Clients tab.
+
+### Changed
+- **Routing is manual** — Config patching is driven by per-client toggles only; no auto-patch on daemon online/offline transitions.
+- **Clients tab is the default landing screen** — Swapped order so Clients appears before Services.
+- **Sendable warning fix** — `@preconcurrency import UserNotifications` in `UpdateManager.swift`.
+
 ## [2.2.9] - 2026-05-27
 
 ### Fixed
