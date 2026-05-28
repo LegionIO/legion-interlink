@@ -792,6 +792,12 @@ enum ClientConfigManager {
     /// Restore only Codex's config.toml.
     static func restoreCodexConfig() { restoreCodexConfigImpl() }
 
+    /// Patch Kai's desktop.json to route inference through LegionIO.
+    static func applyKaiConfig() { patchKaiDesktopImpl() }
+
+    /// Restore Kai's desktop.json from backup.
+    static func restoreKaiConfig() { restoreKaiDesktopImpl() }
+
     // MARK: - Claude Code (~/.claude/settings.json)
 
     private static var claudeSettingsPath: String { "\(home)/.claude/settings.json" }
@@ -919,6 +925,76 @@ wire_api = "responses"
         let fm = FileManager.default
         let path = codexConfigPath
         let backupPath = codexConfigBackupPath
+
+        guard fm.fileExists(atPath: backupPath) else { return }  // no-op if no backup
+        try? fm.removeItem(atPath: path)
+        try? fm.moveItem(atPath: backupPath, toPath: path)
+    }
+
+    // MARK: - Kai (~/.kai/settings/desktop.json)
+
+    private static var kaiDesktopPath: String { "\(home)/.kai/settings/desktop.json" }
+    private static var kaiDesktopBackupPath: String { "\(home)/.kai/settings/desktop.json.legionio-backup" }
+
+    private static func patchKaiDesktopImpl() {
+        let fm = FileManager.default
+        let path = kaiDesktopPath
+        let backupPath = kaiDesktopBackupPath
+
+        // Backup original if not yet done
+        if !fm.fileExists(atPath: backupPath), fm.fileExists(atPath: path) {
+            try? fm.copyItem(atPath: path, toPath: backupPath)
+        }
+
+        // Read current desktop.json (start with empty dict if missing)
+        var json: [String: Any] = [:]
+        if let data = fm.contents(atPath: path),
+           let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            json = parsed
+        }
+
+        // Set agent runtime to "legion"
+        var agent = json["agent"] as? [String: Any] ?? [:]
+        agent["runtime"] = "legion"
+        json["agent"] = agent
+
+        // Set legionio providers + defaultModelKey
+        var models = json["models"] as? [String: Any] ?? [:]
+        var providers = models["providers"] as? [String: Any] ?? [:]
+        providers["legionio"] = [
+            "type": "openai-compatible",
+            "endpoint": "http://127.0.0.1:4567/v1",
+            "apiKey": "legionio-daemon",
+            "useResponsesApi": false,
+            "extraHeaders": [
+                "X-Legion-Client-Tool-Passthrough": "true",
+                "X-Legion-Include-Reasoning": "true"
+            ] as [String: String]
+        ] as [String: Any]
+        providers["legionio_anthropic"] = [
+            "type": "anthropic",
+            "endpoint": "http://127.0.0.1:4567/api/llm/inference",
+            "apiKey": "legionio-daemon"
+        ] as [String: Any]
+        models["providers"] = providers
+        models["defaultModelKey"] = "legionio"
+        json["models"] = models
+
+        // Ensure the settings directory exists
+        let dir = (path as NSString).deletingLastPathComponent
+        try? fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
+
+        guard let data = try? JSONSerialization.data(
+            withJSONObject: json,
+            options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        ) else { return }
+        fm.createFile(atPath: path, contents: data)
+    }
+
+    private static func restoreKaiDesktopImpl() {
+        let fm = FileManager.default
+        let path = kaiDesktopPath
+        let backupPath = kaiDesktopBackupPath
 
         guard fm.fileExists(atPath: backupPath) else { return }  // no-op if no backup
         try? fm.removeItem(atPath: path)

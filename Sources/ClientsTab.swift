@@ -9,6 +9,7 @@ struct ClientsTab: View {
     // Per-client routing toggle — persisted to ~/.legionio/settings/interlink.json
     @State private var claudeRoutingEnabled: Bool = false
     @State private var codexRoutingEnabled: Bool = false
+    @State private var kaiRoutingEnabled: Bool = false
 
     // Install state only — no running state tracked
     @State private var claudeInstalled: Bool = false
@@ -18,6 +19,7 @@ struct ClientsTab: View {
     private var daemonOnline: Bool { manager.overallStatus == .online }
     private var claudeRouted: Bool { daemonOnline && claudeRoutingEnabled }
     private var codexRouted: Bool { daemonOnline && codexRoutingEnabled }
+    private var kaiRouted: Bool { daemonOnline && kaiRoutingEnabled }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -46,6 +48,13 @@ struct ClientsTab: View {
             Task.detached {
                 if enabled { ClientConfigManager.applyCodexConfig() }
                 else { ClientConfigManager.restoreCodexConfig() }
+            }
+        }
+        .onChange(of: kaiRoutingEnabled) { enabled in
+            saveRoutingState()
+            Task.detached {
+                if enabled { ClientConfigManager.applyKaiConfig() }
+                else { ClientConfigManager.restoreKaiConfig() }
             }
         }
     }
@@ -84,7 +93,7 @@ struct ClientsTab: View {
 
             Spacer()
 
-            let anyRouted = claudeRouted || codexRouted
+            let anyRouted = claudeRouted || codexRouted || kaiRouted
             HStack(spacing: 5) {
                 Circle()
                     .fill(anyRouted ? TerminalTheme.green : TerminalTheme.gray)
@@ -204,16 +213,17 @@ struct ClientsTab: View {
                         .font(.system(size: 13, weight: .medium, design: .monospaced))
                         .foregroundColor(TerminalTheme.text)
 
-                    Text(kaiInstalled ? "installed" : "not installed")
+                    Text(kaiInstalled
+                         ? (kaiRouted ? "routed via LegionIO" : "installed")
+                         : "not installed")
                         .font(.system(size: 10, design: .monospaced))
-                        .foregroundColor(TerminalTheme.textDim)
+                        .foregroundColor(kaiRouted ? TerminalTheme.green : TerminalTheme.textDim)
                 }
 
                 Spacer()
 
-                desktopBadge
-
                 if kaiInstalled {
+                    routingToggle(enabled: $kaiRoutingEnabled, active: kaiRouted)
                     TerminalActionButton(label: "open", color: TerminalTheme.green) {
                         NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/Kai.app"))
                     }
@@ -280,38 +290,20 @@ struct ClientsTab: View {
               : "Start the LegionIO daemon to enable routing")
     }
 
-    // MARK: - Badges
-
-    private var desktopBadge: some View {
-        HStack(spacing: 4) {
-            Image(systemName: "desktopcomputer")
-                .font(.system(size: 9))
-            Text("desktop")
-                .font(.system(size: 9, weight: .semibold, design: .monospaced))
-        }
-        .foregroundColor(TerminalTheme.green)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 3)
-        .background(TerminalTheme.green.opacity(0.08))
-        .overlay(
-            RoundedRectangle(cornerRadius: 3)
-                .stroke(TerminalTheme.green.opacity(0.2), lineWidth: 1)
-        )
-        .cornerRadius(3)
-    }
-
     // MARK: - Routing State Persistence (~/.legionio/settings/interlink.json)
 
     private func loadRoutingState() {
         guard let json = SettingsFile.read("interlink") else { return }
         if let claude = json["clientRouting.claude"] as? Bool { claudeRoutingEnabled = claude }
         if let codex  = json["clientRouting.codex"]  as? Bool { codexRoutingEnabled  = codex  }
+        if let kai    = json["clientRouting.kai"]    as? Bool { kaiRoutingEnabled    = kai    }
     }
 
     private func saveRoutingState() {
         var json = SettingsFile.read("interlink") ?? [:]
         json["clientRouting.claude"] = claudeRoutingEnabled
         json["clientRouting.codex"]  = codexRoutingEnabled
+        json["clientRouting.kai"]    = kaiRoutingEnabled
         _ = SettingsFile.write("interlink", content: json)
     }
 
