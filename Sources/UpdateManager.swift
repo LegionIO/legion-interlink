@@ -1,6 +1,6 @@
 import Foundation
 import SwiftUI
-import UserNotifications
+@preconcurrency import UserNotifications
 
 struct UpdateItem: Identifiable {
     enum Source: String {

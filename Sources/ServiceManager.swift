@@ -82,9 +82,14 @@ class ServiceManager: ObservableObject {
 
     var logContents: String { logLines.map(\.text).joined(separator: "\n") }
     @Published var setupNeeded: Bool = false
+    /// True when the LegionIO daemon is online and client configs have been patched.
+    @Published var clientConfigsPatched: Bool = false
 
     /// When true, background polling skips checkAllServices to avoid overwriting transition states.
     private var suppressPolling = false
+
+    /// Tracks the last settled overall status so we can detect online↔offline transitions.
+    private var lastOverallStatus: OverallStatus = .checking
 
     /// Tracks services whose state change was initiated by the user within Interlink.
     /// Cleared after the transition completes. External changes (not in this set) trigger a macOS notification.
@@ -710,17 +715,20 @@ class ServiceManager: ObservableObject {
     private func recalculateOverallStatus() {
         if setupNeeded {
             overallStatus = .setupNeeded
-            return
+        } else {
+            let legionService = services.first(where: { $0.name == .legionio })
+            if legionService?.status == .running {
+                overallStatus = .online
+            } else if services.map(\.status).contains(.unknown) {
+                overallStatus = .checking
+            } else {
+                overallStatus = .offline
+            }
         }
 
-        let legionService = services.first(where: { $0.name == .legionio })
-        if legionService?.status == .running {
-            overallStatus = .online
-        } else if services.map(\.status).contains(.unknown) {
-            overallStatus = .checking
-        } else {
-            overallStatus = .offline
-        }
+        lastOverallStatus = overallStatus
+
+        // Config patching is manual (via Clients tab toggles) — no auto-routing here.
     }
 
     private func startPolling() {
@@ -746,5 +754,250 @@ class ServiceManager: ObservableObject {
         logTimer?.invalidate()
         tailProcess?.terminate()
         tailProcess?.standardOutput.map { ($0 as? Pipe)?.fileHandleForReading.readabilityHandler = nil }
+    }
+}
+
+// MARK: - Client Config Manager
+
+/// Manages patching and restoring AI client config files when the LegionIO
+/// daemon comes online or goes offline.  All methods are nonisolated and must
+/// be called from Task.detached — they never touch the main actor.
+enum ClientConfigManager {
+    private static let daemonInferenceURL = "http://localhost:4567/api/llm/inference"
+    private static let home = FileManager.default.homeDirectoryForCurrentUser.path
+
+    // MARK: - Public Entry Points
+
+    /// Patch all client configs to route inference through LegionIO.
+    static func applyLegionIOConfigs() {
+        patchClaudeSettingsImpl()
+        patchCodexConfigImpl()
+    }
+
+    /// Restore all original client configs from backups.
+    static func restoreOriginalConfigs() {
+        restoreClaudeSettingsImpl()
+        restoreCodexConfigImpl()
+    }
+
+    /// Patch only Claude Code's settings.json.
+    static func applyClaudeConfig() { patchClaudeSettingsImpl() }
+
+    /// Restore only Claude Code's settings.json.
+    static func restoreClaudeConfig() { restoreClaudeSettingsImpl() }
+
+    /// Patch only Codex's config.toml.
+    static func applyCodexConfig() { patchCodexConfigImpl() }
+
+    /// Restore only Codex's config.toml.
+    static func restoreCodexConfig() { restoreCodexConfigImpl() }
+
+    /// Patch Kai's desktop.json to route inference through LegionIO.
+    static func applyKaiConfig() { patchKaiDesktopImpl() }
+
+    /// Restore Kai's desktop.json from backup.
+    static func restoreKaiConfig() { restoreKaiDesktopImpl() }
+
+    // MARK: - Claude Code (~/.claude/settings.json)
+
+    private static var claudeSettingsPath: String { "\(home)/.claude/settings.json" }
+    private static var claudeSettingsBackupPath: String { "\(home)/.claude/settings.json.legionio-backup" }
+
+    private static func patchClaudeSettingsImpl() {
+        let fm = FileManager.default
+        let path = claudeSettingsPath
+        let backupPath = claudeSettingsBackupPath
+
+        // Read existing JSON (start from empty dict if the file doesn't exist)
+        var json: [String: Any] = [:]
+        if let data = fm.contents(atPath: path),
+           let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            json = parsed
+        }
+
+        // Write a faithful backup of the original — token included — so it can be fully restored
+        if !fm.fileExists(atPath: backupPath) {
+            if let backupData = try? JSONSerialization.data(
+                withJSONObject: json,
+                options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+            ) {
+                fm.createFile(atPath: backupPath, contents: backupData)
+            }
+        }
+
+        // Patch env: set ANTHROPIC_BASE_URL, strip the real token and replace with a
+        // placeholder so Claude Code skips the login prompt (the proxy handles auth)
+        var env = json["env"] as? [String: Any] ?? [:]
+        env["ANTHROPIC_BASE_URL"] = daemonInferenceURL
+        env["ANTHROPIC_AUTH_TOKEN"] = "legionio"
+        json["env"] = env
+
+        guard let data = try? JSONSerialization.data(
+            withJSONObject: json,
+            options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        ) else { return }
+
+        // Create parent directory if needed
+        let dir = (path as NSString).deletingLastPathComponent
+        try? fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        fm.createFile(atPath: path, contents: data)
+    }
+
+    private static func restoreClaudeSettingsImpl() {
+        let fm = FileManager.default
+        let path = claudeSettingsPath
+        let backupPath = claudeSettingsBackupPath
+
+        guard fm.fileExists(atPath: backupPath) else { return }  // no-op if no backup
+        try? fm.removeItem(atPath: path)
+        try? fm.moveItem(atPath: backupPath, toPath: path)
+    }
+
+    // MARK: - Codex (~/.codex/config.toml)
+
+    private static var codexConfigPath: String { "\(home)/.codex/config.toml" }
+    private static var codexConfigBackupPath: String { "\(home)/.codex/config.toml.legionio-backup" }
+
+    private static let legionProviderBlock = """
+
+[model_providers.legionio]
+name = "LegionIO"
+base_url = "\(daemonInferenceURL)"
+wire_api = "responses"
+"""
+
+    private static func patchCodexConfigImpl() {
+        let fm = FileManager.default
+        let path = codexConfigPath
+        let backupPath = codexConfigBackupPath
+
+        // Only back up once per session
+        if !fm.fileExists(atPath: backupPath) {
+            if fm.fileExists(atPath: path) {
+                try? fm.copyItem(atPath: path, toPath: backupPath)
+            }
+        }
+
+        // Read existing TOML (or start fresh)
+        var toml = ""
+        if let data = fm.contents(atPath: path),
+           let str = String(data: data, encoding: .utf8) {
+            toml = str
+        }
+
+        // 1. Replace or append the top-level model_provider assignment
+        let providerLine = "model_provider = \"legionio\""
+        if let range = toml.range(of: #"(?m)^model_provider\s*=\s*"[^"]*""#, options: .regularExpression) {
+            toml.replaceSubrange(range, with: providerLine)
+        } else {
+            // Prepend at the top (before any section headers)
+            toml = providerLine + "\n" + toml
+        }
+
+        // 2. Append the [model_providers.legionio] block if not already present
+        if !toml.contains("[model_providers.legionio]") {
+            toml += legionProviderBlock
+        } else {
+            // Update the base_url line inside the existing block
+            let updatedURL = "base_url = \"\(daemonInferenceURL)\""
+            if let range = toml.range(
+                of: #"(?m)(^\[model_providers\.legionio\][\s\S]*?^base_url\s*=\s*)"[^"]*""#,
+                options: .regularExpression
+            ) {
+                // Replace just the base_url value inside the block
+                let block = String(toml[range])
+                if let urlRange = block.range(of: #"base_url\s*=\s*"[^"]*""#, options: .regularExpression) {
+                    var mutableBlock = block
+                    mutableBlock.replaceSubrange(urlRange, with: updatedURL)
+                    toml.replaceSubrange(range, with: mutableBlock)
+                }
+            }
+        }
+
+        guard let data = toml.data(using: .utf8) else { return }
+
+        let dir = (path as NSString).deletingLastPathComponent
+        try? fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        fm.createFile(atPath: path, contents: data)
+    }
+
+    private static func restoreCodexConfigImpl() {
+        let fm = FileManager.default
+        let path = codexConfigPath
+        let backupPath = codexConfigBackupPath
+
+        guard fm.fileExists(atPath: backupPath) else { return }  // no-op if no backup
+        try? fm.removeItem(atPath: path)
+        try? fm.moveItem(atPath: backupPath, toPath: path)
+    }
+
+    // MARK: - Kai (~/.kai/settings/desktop.json)
+
+    private static var kaiDesktopPath: String { "\(home)/.kai/settings/desktop.json" }
+    private static var kaiDesktopBackupPath: String { "\(home)/.kai/settings/desktop.json.legionio-backup" }
+
+    private static func patchKaiDesktopImpl() {
+        let fm = FileManager.default
+        let path = kaiDesktopPath
+        let backupPath = kaiDesktopBackupPath
+
+        // Backup original if not yet done
+        if !fm.fileExists(atPath: backupPath), fm.fileExists(atPath: path) {
+            try? fm.copyItem(atPath: path, toPath: backupPath)
+        }
+
+        // Read current desktop.json (start with empty dict if missing)
+        var json: [String: Any] = [:]
+        if let data = fm.contents(atPath: path),
+           let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            json = parsed
+        }
+
+        // Set agent runtime to "legionio"
+        var agent = json["agent"] as? [String: Any] ?? [:]
+        agent["runtime"] = "legionio"
+        json["agent"] = agent
+
+        // Set legionio providers + defaultModelKey
+        var models = json["models"] as? [String: Any] ?? [:]
+        var providers = models["providers"] as? [String: Any] ?? [:]
+        providers["legionio"] = [
+            "type": "openai-compatible",
+            "endpoint": "http://127.0.0.1:4567/v1",
+            "apiKey": "legionio-daemon",
+            "useResponsesApi": false,
+            "extraHeaders": [
+                "X-Legion-Client-Tool-Passthrough": "true",
+                "X-Legion-Include-Reasoning": "true"
+            ] as [String: String]
+        ] as [String: Any]
+        providers["legionio_anthropic"] = [
+            "type": "anthropic",
+            "endpoint": "http://127.0.0.1:4567/api/llm/inference",
+            "apiKey": "legionio-daemon"
+        ] as [String: Any]
+        models["providers"] = providers
+        models["defaultModelKey"] = "legionio"
+        json["models"] = models
+
+        // Ensure the settings directory exists
+        let dir = (path as NSString).deletingLastPathComponent
+        try? fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
+
+        guard let data = try? JSONSerialization.data(
+            withJSONObject: json,
+            options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        ) else { return }
+        fm.createFile(atPath: path, contents: data)
+    }
+
+    private static func restoreKaiDesktopImpl() {
+        let fm = FileManager.default
+        let path = kaiDesktopPath
+        let backupPath = kaiDesktopBackupPath
+
+        guard fm.fileExists(atPath: backupPath) else { return }  // no-op if no backup
+        try? fm.removeItem(atPath: path)
+        try? fm.moveItem(atPath: backupPath, toPath: path)
     }
 }

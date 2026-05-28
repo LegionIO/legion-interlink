@@ -183,7 +183,7 @@ private struct PulsingStatusText: View {
 
 // MARK: - Pulsing Status Dot
 
-private struct PulsingDot: View {
+struct PulsingDot: View {
     let color: Color
     let isTransitioning: Bool
     @Environment(\.controlActiveState) private var controlActiveState
@@ -238,17 +238,18 @@ struct StatusWindowView: View {
         return "2.2.1"
     }()
 
-    private static let tabServices = 0
-    private static let tabLogs = 1
-    private static let tabIdentity = 2
-    private static let tabLLM = 3
-    private static let tabProviders = 4
-    private static let tabGaia = 5
-    private static let tabMCP = 6
-    private static let tabExtensions = 7
-    private static let tabWorkers = 8
-    private static let tabUpdates = 9
-    private static let tabSettings = 10
+    private static let tabClients = 0
+    private static let tabServices = 1
+    private static let tabLogs = 2
+    private static let tabIdentity = 3
+    private static let tabLLM = 4
+    private static let tabProviders = 5
+    private static let tabGaia = 6
+    private static let tabMCP = 7
+    private static let tabExtensions = 8
+    private static let tabWorkers = 9
+    private static let tabUpdates = 10
+    private static let tabSettings = 11
 
     var body: some View {
         VStack(spacing: 0) {
@@ -262,6 +263,7 @@ struct StatusWindowView: View {
             Group {
                 switch selectedTab {
                 case Self.tabServices:   ServicesTab()
+                case Self.tabClients:    ClientsTab()
                 case Self.tabLogs:       LogsTab()
                 case Self.tabIdentity:   IdentityTab()
                 case Self.tabLLM:        LLMSettingsTab()
@@ -286,7 +288,7 @@ struct StatusWindowView: View {
         .onAppear {
             if !hasAppeared {
                 hasAppeared = true
-                selectedTab = Self.tabServices
+                selectedTab = Self.tabClients
             }
         }
     }
@@ -408,6 +410,7 @@ struct StatusWindowView: View {
     private var tabBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 0) {
+                tabButton(title: "Clients",    icon: "person.2.circle",       index: Self.tabClients)
                 tabButton(title: "Services",   icon: "server.rack",           index: Self.tabServices)
                 tabButton(title: "Logs",       icon: "terminal",              index: Self.tabLogs)
                 tabButton(title: "Identity",   icon: "person.badge.key",      index: Self.tabIdentity)
@@ -462,8 +465,6 @@ struct StatusWindowView: View {
 struct ServicesTab: View {
     @EnvironmentObject var manager: ServiceManager
     @State private var installationState: [ServiceName: Bool] = [:]
-    @State private var kaiInstalled: Bool = false
-    @State private var kaiRunning: Bool = false
     @State private var installing: Set<ServiceName> = []
 
     private var anyTransitioning: Bool {
@@ -494,8 +495,6 @@ struct ServicesTab: View {
                             serviceCard(service)
                         }
                     }
-
-                    kaiCard
                 }
                 .padding(16)
             }
@@ -514,10 +513,6 @@ struct ServicesTab: View {
         installationState[.redis] = fm.isExecutableFile(atPath: "\(brewBin)/redis-server") || fm.isExecutableFile(atPath: "/opt/homebrew/opt/redis/bin/redis-server")
         installationState[.memcached] = fm.isExecutableFile(atPath: "\(brewBin)/memcached") || fm.isExecutableFile(atPath: "/opt/homebrew/opt/memcached/bin/memcached")
         installationState[.ollama] = fm.isExecutableFile(atPath: "\(brewBin)/ollama") || fm.isExecutableFile(atPath: "/usr/local/bin/ollama")
-
-        kaiInstalled = fm.fileExists(atPath: "/Applications/Kai.app") ||
-            fm.fileExists(atPath: "\(FileManager.default.homeDirectoryForCurrentUser.path)/Applications/Kai.app")
-        kaiRunning = NSWorkspace.shared.runningApplications.contains { $0.bundleIdentifier == "io.legionio.kai" }
     }
 
     private func installService(_ service: ServiceName) {
@@ -622,76 +617,6 @@ struct ServicesTab: View {
                 }
             }
             .padding(12)
-        }
-    }
-
-    // MARK: - Kai Card
-
-    private var kaiCard: some View {
-        HoverCard {
-            HStack(spacing: 12) {
-                PulsingDot(
-                    color: kaiInstalled ? (kaiRunning ? TerminalTheme.green : TerminalTheme.gray) : TerminalTheme.gray,
-                    isTransitioning: false
-                )
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Kai")
-                        .font(.system(size: 13, weight: .medium, design: .monospaced))
-                        .foregroundColor(TerminalTheme.text)
-
-                    Text(kaiInstalled ? (kaiRunning ? "running" : "installed") : "not installed")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundColor(kaiRunning ? TerminalTheme.green : TerminalTheme.textDim)
-                }
-
-                Spacer()
-
-                if kaiInstalled {
-                    if kaiRunning {
-                        terminalButton("focus", color: TerminalTheme.accent) {
-                            activateKai()
-                        }
-                    } else {
-                        terminalButton("open", color: TerminalTheme.green) {
-                            openKai()
-                        }
-                    }
-                } else {
-                    terminalButton("install", color: TerminalTheme.accent) {
-                        installKai()
-                    }
-                }
-            }
-            .padding(12)
-        }
-    }
-
-    private func openKai() {
-        NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/Kai.app"))
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { kaiRunning = true }
-    }
-
-    private func activateKai() {
-        if let app = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == "io.legionio.kai" }) {
-            app.activate()
-        }
-    }
-
-    private func installKai() {
-        let brew = ServiceManager.shared.resolvedBrewPathPublic
-        Task.detached {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: brew)
-            process.arguments = ["install", "--cask", "legionio/tap/kai"]
-            process.standardOutput = FileHandle.nullDevice
-            process.standardError = FileHandle.nullDevice
-            try? process.run()
-            process.waitUntilExit()
-            let success = process.terminationStatus == 0
-            await MainActor.run {
-                if success { kaiInstalled = true }
-            }
         }
     }
 
@@ -846,7 +771,7 @@ struct ServicesTab: View {
 
 // MARK: - Terminal Action Button (with hover)
 
-private struct TerminalActionButton: View {
+struct TerminalActionButton: View {
     let label: String
     let color: Color
     let action: () -> Void
