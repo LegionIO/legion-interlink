@@ -953,9 +953,9 @@ wire_api = "responses"
             json = parsed
         }
 
-        // Set agent runtime to "legion"
+        // Set agent runtime to "legionio"
         var agent = json["agent"] as? [String: Any] ?? [:]
-        agent["runtime"] = "legion"
+        agent["runtime"] = "legionio"
         json["agent"] = agent
 
         // Set legionio providers + defaultModelKey
