@@ -819,11 +819,11 @@ enum ClientConfigManager {
             }
         }
 
-        // Patch env: set ANTHROPIC_BASE_URL and strip ANTHROPIC_AUTH_TOKEN
-        // so the token is never sent to the LegionIO proxy
+        // Patch env: set ANTHROPIC_BASE_URL, strip the real token and replace with a
+        // placeholder so Claude Code skips the login prompt (the proxy handles auth)
         var env = json["env"] as? [String: Any] ?? [:]
         env["ANTHROPIC_BASE_URL"] = daemonInferenceURL
-        env.removeValue(forKey: "ANTHROPIC_AUTH_TOKEN")
+        env["ANTHROPIC_AUTH_TOKEN"] = "legionio"
         json["env"] = env
 
         guard let data = try? JSONSerialization.data(
