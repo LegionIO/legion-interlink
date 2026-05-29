@@ -935,6 +935,8 @@ wire_api = "responses"
 
     private static var kaiDesktopPath: String { "\(home)/.kai/settings/desktop.json" }
     private static var kaiDesktopBackupPath: String { "\(home)/.kai/settings/desktop.json.legionio-backup" }
+    private static var kaiLlmPath: String { "\(home)/.kai/settings/llm.json" }
+    private static var kaiLlmBackupPath: String { "\(home)/.kai/settings/llm.json.legionio-backup" }
 
     private static func patchKaiDesktopImpl() {
         let fm = FileManager.default
@@ -998,15 +1000,46 @@ wire_api = "responses"
             options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         ) else { return }
         fm.createFile(atPath: path, contents: data)
+
+        // Also patch llm.json: override default_model so loadAppModelsConfig()
+        // picks "legionio" instead of whatever the user's llm.json specifies.
+        let llmPath = kaiLlmPath
+        let llmBackupPath = kaiLlmBackupPath
+        if !fm.fileExists(atPath: llmBackupPath), fm.fileExists(atPath: llmPath) {
+            try? fm.copyItem(atPath: llmPath, toPath: llmBackupPath)
+        }
+        var llmJson: [String: Any] = [:]
+        if let llmData = fm.contents(atPath: llmPath),
+           let llmParsed = try? JSONSerialization.jsonObject(with: llmData) as? [String: Any] {
+            llmJson = llmParsed
+        }
+        var llmInner = llmJson["llm"] as? [String: Any] ?? [:]
+        llmInner["default_model"] = "legionio"
+        llmInner["default_provider"] = "legionio"
+        llmJson["llm"] = llmInner
+        if let llmData = try? JSONSerialization.data(
+            withJSONObject: llmJson,
+            options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        ) {
+            fm.createFile(atPath: llmPath, contents: llmData)
+        }
     }
 
     private static func restoreKaiDesktopImpl() {
         let fm = FileManager.default
+
         let path = kaiDesktopPath
         let backupPath = kaiDesktopBackupPath
+        if fm.fileExists(atPath: backupPath) {
+            try? fm.removeItem(atPath: path)
+            try? fm.moveItem(atPath: backupPath, toPath: path)
+        }
 
-        guard fm.fileExists(atPath: backupPath) else { return }  // no-op if no backup
-        try? fm.removeItem(atPath: path)
-        try? fm.moveItem(atPath: backupPath, toPath: path)
+        let llmPath = kaiLlmPath
+        let llmBackupPath = kaiLlmBackupPath
+        if fm.fileExists(atPath: llmBackupPath) {
+            try? fm.removeItem(atPath: llmPath)
+            try? fm.moveItem(atPath: llmBackupPath, toPath: llmPath)
+        }
     }
 }
