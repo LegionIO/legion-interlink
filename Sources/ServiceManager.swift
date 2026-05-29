@@ -973,6 +973,20 @@ wire_api = "responses"
         ] as [String: Any]
         models["providers"] = providers
         models["defaultModelKey"] = "legionio"
+
+        // Upsert the legionio catalog entry — remove any stale entry (e.g. from the
+        // old plugin which incorrectly set provider: "bedrock") and prepend a correct one.
+        let legionioEntry: [String: Any] = [
+            "key":         "legionio",
+            "displayName": "LegionIO",
+            "provider":    "legionio",
+            "modelName":   "legionio"
+        ]
+        var catalog = (models["catalog"] as? [[String: Any]] ?? [])
+            .filter { ($0["key"] as? String) != "legionio" }
+        catalog.insert(legionioEntry, at: 0)
+        models["catalog"] = catalog
+
         json["models"] = models
 
         // Ensure the settings directory exists
