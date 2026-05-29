@@ -963,18 +963,13 @@ wire_api = "responses"
         var providers = models["providers"] as? [String: Any] ?? [:]
         providers["legionio"] = [
             "type": "openai-compatible",
-            "endpoint": "http://127.0.0.1:4567/v1",
+            "endpoint": "http://127.0.0.1:4567/api/llm/inference/v1",
             "apiKey": "legionio-daemon",
             "useResponsesApi": false,
             "extraHeaders": [
                 "X-Legion-Client-Tool-Passthrough": "true",
                 "X-Legion-Include-Reasoning": "true"
             ] as [String: String]
-        ] as [String: Any]
-        providers["legionio_anthropic"] = [
-            "type": "anthropic",
-            "endpoint": "http://127.0.0.1:4567/api/llm/inference",
-            "apiKey": "legionio-daemon"
         ] as [String: Any]
         models["providers"] = providers
         models["defaultModelKey"] = "legionio"
