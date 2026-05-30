@@ -1,5 +1,10 @@
 # Changelog
 
+## [2.3.2] - 2026-05-29
+
+### Fixed
+- **Kai routing patches correct config file** — Replaced `~/.kai/config.toml` approach (not read by Kai Desktop) with `~/.kai/settings/desktop.json` + `~/.kai/settings/llm.json`. The patch sets `agent.runtime = "legionio"`, registers the `legionio` openai-compatible provider at `http://127.0.0.1:4567/api/llm/inference/v1`, upserts the `legionio` model catalog entry with `provider: "legionio"` (removing any stale entry from prior plugin installs), and sets `defaultModelKey = "legionio"`. Also patches `llm.json` `default_model` / `default_provider` so Kai's config loader resolves the correct model. Both files are backed up before patching and fully restored on toggle-off.
+
 ## [2.3.1] - 2026-05-29
 
 ### Added
