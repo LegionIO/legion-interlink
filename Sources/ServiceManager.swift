@@ -764,6 +764,7 @@ class ServiceManager: ObservableObject {
 /// be called from Task.detached — they never touch the main actor.
 enum ClientConfigManager {
     private static let daemonInferenceURL = "http://localhost:4567/api/llm/inference"
+    private static let legionModel = "legionio"
     private static let home = FileManager.default.homeDirectoryForCurrentUser.path
 
     // MARK: - Public Entry Points
@@ -827,10 +828,17 @@ enum ClientConfigManager {
 
         // Patch env: set ANTHROPIC_BASE_URL, strip the real token and replace with a
         // placeholder so Claude Code skips the login prompt (the proxy handles auth)
+        // Also set all default model envs to the LegionIO model so the user never has to
+        // pick one — it just works.
         var env = json["env"] as? [String: Any] ?? [:]
         env["ANTHROPIC_BASE_URL"] = daemonInferenceURL
         env["ANTHROPIC_AUTH_TOKEN"] = "legionio"
+        env["CLAUDE_DEFAULT_MODEL"] = legionModel
+        env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = legionModel
+        env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = legionModel
+        env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = legionModel
         json["env"] = env
+        json["model"] = legionModel
 
         guard let data = try? JSONSerialization.data(
             withJSONObject: json,
@@ -866,6 +874,8 @@ base_url = "\(daemonInferenceURL)"
 wire_api = "responses"
 """
 
+    private static let legionModelLine = "model = \"\(legionModel)\""
+
     private static func patchCodexConfigImpl() {
         let fm = FileManager.default
         let path = codexConfigPath
@@ -894,7 +904,17 @@ wire_api = "responses"
             toml = providerLine + "\n" + toml
         }
 
-        // 2. Append the [model_providers.legionio] block if not already present
+        // 2. Replace or append the top-level model assignment
+        if let range = toml.range(of: #"(?m)^model\s*=\s*"[^"]*""#, options: .regularExpression) {
+            toml.replaceSubrange(range, with: legionModelLine)
+        } else if let range = toml.range(of: #"(?m)^#model\s*=\s*"[^"]*""#, options: .regularExpression) {
+            toml.replaceSubrange(range, with: legionModelLine)
+        } else {
+            // Append after provider line
+            toml += "\n" + legionModelLine
+        }
+
+        // 3. Append the [model_providers.legionio] block if not already present
         if !toml.contains("[model_providers.legionio]") {
             toml += legionProviderBlock
         } else {
@@ -936,14 +956,6 @@ wire_api = "responses"
     private static var kaiConfigPath: String { "\(home)/.kai/config.toml" }
     private static var kaiConfigBackupPath: String { "\(home)/.kai/config.toml.legionio-backup" }
 
-    private static let kaiProviderBlock = """
-
-[model_providers.legionio]
-name = "LegionIO"
-base_url = "\(daemonInferenceURL)"
-wire_api = "responses"
-"""
-
     private static func patchKaiConfigImpl() {
         let fm = FileManager.default
         let path = kaiConfigPath
@@ -972,9 +984,19 @@ wire_api = "responses"
             toml = providerLine + "\n" + toml
         }
 
-        // 2. Append the [model_providers.legionio] block if not already present
+        // 2. Replace or append the top-level model assignment
+        if let range = toml.range(of: #"(?m)^model\s*=\s*"[^"]*""#, options: .regularExpression) {
+            toml.replaceSubrange(range, with: legionModelLine)
+        } else if let range = toml.range(of: #"(?m)^#model\s*=\s*"[^"]*""#, options: .regularExpression) {
+            toml.replaceSubrange(range, with: legionModelLine)
+        } else {
+            // Append after provider line
+            toml += "\n" + legionModelLine
+        }
+
+        // 3. Append the [model_providers.legionio] block if not already present
         if !toml.contains("[model_providers.legionio]") {
-            toml += kaiProviderBlock
+            toml += legionProviderBlock
         } else {
             // Update the base_url line inside the existing block
             let updatedURL = "base_url = \"\(daemonInferenceURL)\""
