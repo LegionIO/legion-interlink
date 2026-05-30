@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.3.1] - 2026-05-29
+
+### Added
+- **Kai routing toggle** — Kai client card with per-client LegionIO ↔ native routing toggle, matching Claude Code and Codex. Patches `~/.kai/config.toml` with LegionIO provider config when routing is enabled.
+- **Per-client config restore** — All three clients (Claude, Codex, Kai) now properly restore their original config files when toggled back to "native" mode. Backup/restore cycle works cleanly: enable routes through LegionIO, disable restores originals.
+
+### Fixed
+- **Task.detached ambiguity** — Added explicit `priority: .utility` to all detached tasks for Swift 6 strict concurrency compatibility.
+- **Kai routing state persistence** — Kai routing state is now saved and loaded from `~/.legionio/settings/interlink.json` alongside Claude and Codex.
+
 ## [2.3.0] - 2026-05-28
 
 ### Added

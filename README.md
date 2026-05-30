@@ -38,10 +38,11 @@ The icon shows a Legion network grid with a colored status badge:
 
 ## Dashboard
 
-A native window with eleven tabs:
+A native window with twelve tabs:
 
 | Tab        | Shows                                                        |
 |------------|--------------------------------------------------------------|
+| Clients    | Claude Code, Codex, and Kai — install status, per-client LegionIO ↔ native routing toggle, one-click open buttons |
 | Services   | Per-service cards with start/stop, daemon component readiness |
 | Logs       | Live daemon log viewer with auto-scroll and clear            |
 | Identity   | Current session identity and auth provider status            |
@@ -53,6 +54,23 @@ A native window with eleven tabs:
 | Workers    | Active worker actors with task counts                        |
 | Updates    | Gem version checker with auto-update for lex-* extensions    |
 | Settings   | Daemon settings browser (read from `~/.legionio/settings/`)  |
+
+### Client Routing
+
+The Clients tab lets you route Claude Code, Codex, and Kai through the LegionIO daemon with a single click:
+
+- **Toggle "LegionIO"** — Patches the client's config file to route through `localhost:4567`. Original config is backed up.
+- **Toggle "native"** — Restores the client's config from backup, reverting to its original configuration.
+- **Per-client** — Each client is toggled independently. Claude Code launches via Terminal, Codex and Kai open as desktop apps.
+- Routing state is persisted to `~/.legionio/settings/interlink.json` across app restarts.
+- Routing is disabled (toggle grayed out) when the daemon is offline.
+
+Config files managed:
+| Client      | Config File                    |
+|-------------|--------------------------------|
+| Claude Code | `~/.claude/settings.json`      |
+| Codex       | `~/.codex/config.toml`         |
+| Kai         | `~/.kai/config.toml`           |
 
 ## First Launch (Onboarding)
 

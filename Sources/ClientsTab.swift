@@ -9,12 +9,11 @@ struct ClientsTab: View {
     // Per-client routing toggle — persisted to ~/.legionio/settings/interlink.json
     @State private var claudeRoutingEnabled: Bool = false
     @State private var codexRoutingEnabled: Bool = false
-    @State private var kaiRoutingEnabled: Bool = false
-
     // Install state only — no running state tracked
     @State private var claudeInstalled: Bool = false
     @State private var codexInstalled: Bool = false
     @State private var kaiInstalled: Bool = false
+    @State private var kaiRoutingEnabled: Bool = false
 
     private var daemonOnline: Bool { manager.overallStatus == .online }
     private var claudeRouted: Bool { daemonOnline && claudeRoutingEnabled }
@@ -38,21 +37,21 @@ struct ClientsTab: View {
         .task { detectClients(); loadRoutingState() }
         .onChange(of: claudeRoutingEnabled) { enabled in
             saveRoutingState()
-            Task.detached {
+            Task.detached(priority: .utility) {
                 if enabled { ClientConfigManager.applyClaudeConfig() }
                 else { ClientConfigManager.restoreClaudeConfig() }
             }
         }
         .onChange(of: codexRoutingEnabled) { enabled in
             saveRoutingState()
-            Task.detached {
+            Task.detached(priority: .utility) {
                 if enabled { ClientConfigManager.applyCodexConfig() }
                 else { ClientConfigManager.restoreCodexConfig() }
             }
         }
         .onChange(of: kaiRoutingEnabled) { enabled in
             saveRoutingState()
-            Task.detached {
+            Task.detached(priority: .utility) {
                 if enabled { ClientConfigManager.applyKaiConfig() }
                 else { ClientConfigManager.restoreKaiConfig() }
             }
