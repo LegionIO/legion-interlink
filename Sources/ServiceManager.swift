@@ -792,11 +792,11 @@ enum ClientConfigManager {
     /// Restore only Codex's config.toml.
     static func restoreCodexConfig() { restoreCodexConfigImpl() }
 
-    /// Patch Kai's desktop.json to route inference through LegionIO.
-    static func applyKaiConfig() { patchKaiDesktopImpl() }
+    /// Patch only Kai's config.toml.
+    static func applyKaiConfig() { patchKaiConfigImpl() }
 
-    /// Restore Kai's desktop.json from backup.
-    static func restoreKaiConfig() { restoreKaiDesktopImpl() }
+    /// Restore only Kai's config.toml.
+    static func restoreKaiConfig() { restoreKaiConfigImpl() }
 
     // MARK: - Claude Code (~/.claude/settings.json)
 
@@ -931,73 +931,82 @@ wire_api = "responses"
         try? fm.moveItem(atPath: backupPath, toPath: path)
     }
 
-    // MARK: - Kai (~/.kai/settings/desktop.json)
+    // MARK: - Kai (~/.kai/config.toml)
 
-    private static var kaiDesktopPath: String { "\(home)/.kai/settings/desktop.json" }
-    private static var kaiDesktopBackupPath: String { "\(home)/.kai/settings/desktop.json.legionio-backup" }
+    private static var kaiConfigPath: String { "\(home)/.kai/config.toml" }
+    private static var kaiConfigBackupPath: String { "\(home)/.kai/config.toml.legionio-backup" }
 
-    private static func patchKaiDesktopImpl() {
+    private static let kaiProviderBlock = """
+
+[model_providers.legionio]
+name = "LegionIO"
+base_url = "\(daemonInferenceURL)"
+wire_api = "responses"
+"""
+
+    private static func patchKaiConfigImpl() {
         let fm = FileManager.default
-        let path = kaiDesktopPath
-        let backupPath = kaiDesktopBackupPath
+        let path = kaiConfigPath
+        let backupPath = kaiConfigBackupPath
 
-        // Backup original if not yet done
-        if !fm.fileExists(atPath: backupPath), fm.fileExists(atPath: path) {
-            try? fm.copyItem(atPath: path, toPath: backupPath)
+        // Only back up once per session
+        if !fm.fileExists(atPath: backupPath) {
+            if fm.fileExists(atPath: path) {
+                try? fm.copyItem(atPath: path, toPath: backupPath)
+            }
         }
 
-        // Read current desktop.json (start with empty dict if missing)
-        var json: [String: Any] = [:]
+        // Read existing TOML (or start fresh)
+        var toml = ""
         if let data = fm.contents(atPath: path),
-           let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            json = parsed
+           let str = String(data: data, encoding: .utf8) {
+            toml = str
         }
 
-        // Set agent runtime to "legionio"
-        var agent = json["agent"] as? [String: Any] ?? [:]
-        agent["runtime"] = "legionio"
-        json["agent"] = agent
+        // 1. Replace or append the top-level model_provider assignment
+        let providerLine = "model_provider = \"legionio\""
+        if let range = toml.range(of: #"(?m)^model_provider\s*=\s*"[^"]*""#, options: .regularExpression) {
+            toml.replaceSubrange(range, with: providerLine)
+        } else {
+            // Prepend at the top (before any section headers)
+            toml = providerLine + "\n" + toml
+        }
 
-        // Set legionio providers + defaultModelKey
-        var models = json["models"] as? [String: Any] ?? [:]
-        var providers = models["providers"] as? [String: Any] ?? [:]
-        providers["legionio"] = [
-            "type": "openai-compatible",
-            "endpoint": "http://127.0.0.1:4567/v1",
-            "apiKey": "legionio-daemon",
-            "useResponsesApi": false,
-            "extraHeaders": [
-                "X-Legion-Client-Tool-Passthrough": "true",
-                "X-Legion-Include-Reasoning": "true"
-            ] as [String: String]
-        ] as [String: Any]
-        providers["legionio_anthropic"] = [
-            "type": "anthropic",
-            "endpoint": "http://127.0.0.1:4567/api/llm/inference",
-            "apiKey": "legionio-daemon"
-        ] as [String: Any]
-        models["providers"] = providers
-        models["defaultModelKey"] = "legionio"
-        json["models"] = models
+        // 2. Append the [model_providers.legionio] block if not already present
+        if !toml.contains("[model_providers.legionio]") {
+            toml += kaiProviderBlock
+        } else {
+            // Update the base_url line inside the existing block
+            let updatedURL = "base_url = \"\(daemonInferenceURL)\""
+            if let range = toml.range(
+                of: #"(?m)(^\[model_providers\.legionio\][\s\S]*?^base_url\s*=\s*)"[^"]*""#,
+                options: .regularExpression
+            ) {
+                // Replace just the base_url value inside the block
+                let block = String(toml[range])
+                if let urlRange = block.range(of: #"base_url\s*=\s*"[^"]*""#, options: .regularExpression) {
+                    var mutableBlock = block
+                    mutableBlock.replaceSubrange(urlRange, with: updatedURL)
+                    toml.replaceSubrange(range, with: mutableBlock)
+                }
+            }
+        }
 
-        // Ensure the settings directory exists
+        guard let data = toml.data(using: .utf8) else { return }
+
         let dir = (path as NSString).deletingLastPathComponent
         try? fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
-
-        guard let data = try? JSONSerialization.data(
-            withJSONObject: json,
-            options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-        ) else { return }
         fm.createFile(atPath: path, contents: data)
     }
 
-    private static func restoreKaiDesktopImpl() {
+    private static func restoreKaiConfigImpl() {
         let fm = FileManager.default
-        let path = kaiDesktopPath
-        let backupPath = kaiDesktopBackupPath
+        let path = kaiConfigPath
+        let backupPath = kaiConfigBackupPath
 
         guard fm.fileExists(atPath: backupPath) else { return }  // no-op if no backup
         try? fm.removeItem(atPath: path)
         try? fm.moveItem(atPath: backupPath, toPath: path)
     }
+
 }
