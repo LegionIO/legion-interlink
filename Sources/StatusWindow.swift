@@ -11,6 +11,7 @@ enum TerminalTheme {
     static let text = Color(red: 0.88, green: 0.88, blue: 0.90)
     static let textDim = Color(red: 0.55, green: 0.55, blue: 0.58)
     static let accent = Color(red: 0.56, green: 0.50, blue: 0.92)
+    static let cyan = Color(red: 0.25, green: 0.82, blue: 0.88)
     static let green = Color(red: 0.30, green: 0.85, blue: 0.45)
     static let red = Color(red: 0.95, green: 0.35, blue: 0.35)
     static let yellow = Color(red: 0.95, green: 0.80, blue: 0.25)

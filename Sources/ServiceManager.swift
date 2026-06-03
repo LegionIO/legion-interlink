@@ -275,7 +275,9 @@ class ServiceManager: ObservableObject {
             let result = serviceMap[service.brewName] ?? (running: false, pid: nil)
             if service == .legionio {
                 daemonReadiness = daemonHealth.readiness
-                let daemonOnline = result.running && daemonHealth.responding
+                // Consider the daemon online if brew reports it running OR if the HTTP
+                // health endpoint responds — covers `bundle exec exe/legionio start` in dev.
+                let daemonOnline = daemonHealth.responding || result.running
                 updateServiceIfStable(.legionio, daemonOnline ? .running : .stopped, pid: result.pid)
             } else {
                 updateServiceIfStable(service, result.running ? .running : .stopped, pid: result.pid)
@@ -800,155 +802,119 @@ enum ClientConfigManager {
     static func restoreKaiConfig() { restoreKaiDesktopImpl() }
 
     // MARK: - Claude Code (~/.claude/settings.json)
+    // Both directions are written explicitly — no backup/restore needed.
+    // Toggling to LegionIO injects proxy vars; toggling to native strips them.
 
     private static var claudeSettingsPath: String { "\(home)/.claude/settings.json" }
-    private static var claudeSettingsBackupPath: String { "\(home)/.claude/settings.json.legionio-backup" }
 
-    private static func patchClaudeSettingsImpl() {
-        let fm = FileManager.default
+    private static let proxyEnvKeys = [
+        "ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN",
+        "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY",
+        "CLAUDE_CODE_USE_BEDROCK", "AWS_PROFILE", "AWS_REGION"
+    ]
+
+    private static func readClaudeSettings() -> [String: Any] {
         let path = claudeSettingsPath
-        let backupPath = claudeSettingsBackupPath
+        guard let data = FileManager.default.contents(atPath: path),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return [:] }
+        return json
+    }
 
-        // Read existing JSON (start from empty dict if the file doesn't exist)
-        var json: [String: Any] = [:]
-        if let data = fm.contents(atPath: path),
-           let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            json = parsed
-        }
-
-        // Write a faithful backup of the original — token included — so it can be fully restored
-        if !fm.fileExists(atPath: backupPath) {
-            if let backupData = try? JSONSerialization.data(
-                withJSONObject: json,
-                options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-            ) {
-                fm.createFile(atPath: backupPath, contents: backupData)
-            }
-        }
-
-        // Patch env: set ANTHROPIC_BASE_URL, strip the real token and replace with a
-        // placeholder so Claude Code skips the login prompt (the proxy handles auth)
-        // Also set all default model envs to the LegionIO model so the user never has to
-        // pick one — it just works.
-        var env = json["env"] as? [String: Any] ?? [:]
-        env["ANTHROPIC_BASE_URL"] = daemonInferenceURL
-        env["ANTHROPIC_AUTH_TOKEN"] = "legionio"
-        env["CLAUDE_DEFAULT_MODEL"] = legionModel
-        env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = legionModel
-        env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = legionModel
-        env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = legionModel
-        json["env"] = env
-        json["model"] = legionModel
-
+    private static func writeClaudeSettings(_ json: [String: Any]) {
         guard let data = try? JSONSerialization.data(
             withJSONObject: json,
             options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         ) else { return }
-
-        // Create parent directory if needed
+        let path = claudeSettingsPath
         let dir = (path as NSString).deletingLastPathComponent
-        try? fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        fm.createFile(atPath: path, contents: data)
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: path, contents: data)
+    }
+
+    private static func patchClaudeSettingsImpl() {
+        var json = readClaudeSettings()
+        var env = json["env"] as? [String: Any] ?? [:]
+
+        env["ANTHROPIC_BASE_URL"] = "http://localhost:4567"
+        env["ANTHROPIC_API_KEY"] = "legion"
+        env["ANTHROPIC_AUTH_TOKEN"] = ""
+        env["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"] = "1"
+        env["CLAUDE_CODE_USE_BEDROCK"] = ""
+        env["AWS_PROFILE"] = ""
+        env["AWS_REGION"] = ""
+        env.removeValue(forKey: "ANTHROPIC_DEFAULT_OPUS_MODEL")
+        env.removeValue(forKey: "ANTHROPIC_DEFAULT_SONNET_MODEL")
+        env.removeValue(forKey: "ANTHROPIC_DEFAULT_HAIKU_MODEL")
+        json["env"] = env
+        json["model"] = legionModel
+
+        writeClaudeSettings(json)
     }
 
     private static func restoreClaudeSettingsImpl() {
-        let fm = FileManager.default
-        let path = claudeSettingsPath
-        let backupPath = claudeSettingsBackupPath
+        var json = readClaudeSettings()
+        guard !json.isEmpty else { return }
 
-        guard fm.fileExists(atPath: backupPath) else { return }  // no-op if no backup
-        try? fm.removeItem(atPath: path)
-        try? fm.moveItem(atPath: backupPath, toPath: path)
+        var env = json["env"] as? [String: Any] ?? [:]
+        for key in proxyEnvKeys { env.removeValue(forKey: key) }
+        if env.isEmpty {
+            json.removeValue(forKey: "env")
+        } else {
+            json["env"] = env
+        }
+        json.removeValue(forKey: "model")
+
+        writeClaudeSettings(json)
     }
 
     // MARK: - Codex (~/.codex/config.toml)
+    // Interlink only manages the `profile` key. The full provider config is written by
+    // `legionio setup proxy-mode` into legionio.config.toml — we just switch the active profile.
 
     private static var codexConfigPath: String { "\(home)/.codex/config.toml" }
-    private static var codexConfigBackupPath: String { "\(home)/.codex/config.toml.legionio-backup" }
-
-    private static let legionProviderBlock = """
-
-[model_providers.legionio]
-name = "LegionIO"
-base_url = "\(daemonInferenceURL)"
-wire_api = "responses"
-"""
-
-    private static let legionModelLine = "model = \"\(legionModel)\""
 
     private static func patchCodexConfigImpl() {
         let fm = FileManager.default
         let path = codexConfigPath
-        let backupPath = codexConfigBackupPath
+        let profileLine = "profile = \"legionio\""
 
-        // Only back up once per session
-        if !fm.fileExists(atPath: backupPath) {
-            if fm.fileExists(atPath: path) {
-                try? fm.copyItem(atPath: path, toPath: backupPath)
-            }
-        }
-
-        // Read existing TOML (or start fresh)
         var toml = ""
         if let data = fm.contents(atPath: path),
            let str = String(data: data, encoding: .utf8) {
             toml = str
         }
 
-        // 1. Replace or append the top-level model_provider assignment
-        let providerLine = "model_provider = \"legionio\""
-        if let range = toml.range(of: #"(?m)^model_provider\s*=\s*"[^"]*""#, options: .regularExpression) {
-            toml.replaceSubrange(range, with: providerLine)
-        } else {
-            // Prepend at the top (before any section headers)
-            toml = providerLine + "\n" + toml
+        if toml.range(of: #"(?m)^\s*profile\s*=\s*"legionio""#, options: .regularExpression) != nil {
+            return  // already set
         }
 
-        // 2. Replace or append the top-level model assignment
-        if let range = toml.range(of: #"(?m)^model\s*=\s*"[^"]*""#, options: .regularExpression) {
-            toml.replaceSubrange(range, with: legionModelLine)
-        } else if let range = toml.range(of: #"(?m)^#model\s*=\s*"[^"]*""#, options: .regularExpression) {
-            toml.replaceSubrange(range, with: legionModelLine)
+        if let range = toml.range(of: #"(?m)^\s*profile\s*=\s*"[^"]*""#, options: .regularExpression) {
+            toml.replaceSubrange(range, with: profileLine)
         } else {
-            // Append after provider line
-            toml += "\n" + legionModelLine
+            toml = toml.isEmpty ? profileLine + "\n" : profileLine + "\n\n" + toml.trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
         }
-
-        // 3. Append the [model_providers.legionio] block if not already present
-        if !toml.contains("[model_providers.legionio]") {
-            toml += legionProviderBlock
-        } else {
-            // Update the base_url line inside the existing block
-            let updatedURL = "base_url = \"\(daemonInferenceURL)\""
-            if let range = toml.range(
-                of: #"(?m)(^\[model_providers\.legionio\][\s\S]*?^base_url\s*=\s*)"[^"]*""#,
-                options: .regularExpression
-            ) {
-                // Replace just the base_url value inside the block
-                let block = String(toml[range])
-                if let urlRange = block.range(of: #"base_url\s*=\s*"[^"]*""#, options: .regularExpression) {
-                    var mutableBlock = block
-                    mutableBlock.replaceSubrange(urlRange, with: updatedURL)
-                    toml.replaceSubrange(range, with: mutableBlock)
-                }
-            }
-        }
-
-        guard let data = toml.data(using: .utf8) else { return }
 
         let dir = (path as NSString).deletingLastPathComponent
         try? fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        fm.createFile(atPath: path, contents: data)
+        fm.createFile(atPath: path, contents: toml.data(using: .utf8))
     }
 
     private static func restoreCodexConfigImpl() {
         let fm = FileManager.default
         let path = codexConfigPath
-        let backupPath = codexConfigBackupPath
 
-        guard fm.fileExists(atPath: backupPath) else { return }  // no-op if no backup
-        try? fm.removeItem(atPath: path)
-        try? fm.moveItem(atPath: backupPath, toPath: path)
+        guard let data = fm.contents(atPath: path),
+              var toml = String(data: data, encoding: .utf8) else { return }
+
+        // Remove the profile = "legionio" line (and any immediately following blank line)
+        toml = toml.replacingOccurrences(
+            of: #"(?m)^\s*profile\s*=\s*"legionio"\n(\n)?"#,
+            with: "",
+            options: .regularExpression
+        )
+
+        fm.createFile(atPath: path, contents: toml.data(using: .utf8))
     }
 
     // MARK: - Kai (~/.kai/settings/desktop.json + llm.json)
