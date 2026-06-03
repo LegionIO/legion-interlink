@@ -848,6 +848,7 @@ enum ClientConfigManager {
         env.removeValue(forKey: "ANTHROPIC_DEFAULT_SONNET_MODEL")
         env.removeValue(forKey: "ANTHROPIC_DEFAULT_HAIKU_MODEL")
         json["env"] = env
+        json["model"] = legionModel
 
         guard let data = try? JSONSerialization.data(
             withJSONObject: json,
