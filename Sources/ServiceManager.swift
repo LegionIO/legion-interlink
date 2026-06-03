@@ -802,42 +802,41 @@ enum ClientConfigManager {
     static func restoreKaiConfig() { restoreKaiDesktopImpl() }
 
     // MARK: - Claude Code (~/.claude/settings.json)
+    // Both directions are written explicitly — no backup/restore needed.
+    // Toggling to LegionIO injects proxy vars; toggling to native strips them.
 
     private static var claudeSettingsPath: String { "\(home)/.claude/settings.json" }
-    private static var claudeSettingsBackupPath: String { "\(home)/.claude/settings.json.legionio-backup" }
+
+    private static let proxyEnvKeys = [
+        "ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN",
+        "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY",
+        "CLAUDE_CODE_USE_BEDROCK", "AWS_PROFILE", "AWS_REGION"
+    ]
+
+    private static func readClaudeSettings() -> [String: Any] {
+        let path = claudeSettingsPath
+        guard let data = FileManager.default.contents(atPath: path),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return [:] }
+        return json
+    }
+
+    private static func writeClaudeSettings(_ json: [String: Any]) {
+        guard let data = try? JSONSerialization.data(
+            withJSONObject: json,
+            options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        ) else { return }
+        let path = claudeSettingsPath
+        let dir = (path as NSString).deletingLastPathComponent
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: path, contents: data)
+    }
 
     private static func patchClaudeSettingsImpl() {
-        let fm = FileManager.default
-        let path = claudeSettingsPath
-        let backupPath = claudeSettingsBackupPath
-
-        // Read existing JSON (start from empty dict if the file doesn't exist)
-        var json: [String: Any] = [:]
-        if let data = fm.contents(atPath: path),
-           let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            json = parsed
-        }
-
-        // Write a faithful backup of the original — token included — so it can be fully restored
-        if !fm.fileExists(atPath: backupPath) {
-            if let backupData = try? JSONSerialization.data(
-                withJSONObject: json,
-                options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-            ) {
-                fm.createFile(atPath: backupPath, contents: backupData)
-            }
-        }
-
-        // Match the env var set that `legionio setup proxy-mode` writes to ~/.zsh_legionio:
-        // - Point Claude Code at the LegionIO proxy base URL (no /v1 suffix — Claude Code appends it)
-        // - Use a dummy API key so Claude Code skips the login prompt (the proxy handles auth)
-        // - Clear the real auth token so Anthropic direct auth doesn't kick in
-        // - Enable gateway model discovery so the legionio model appears in the picker
-        // - Clear Bedrock/AWS env vars that would override routing
-        // - Unset per-model default overrides so the picker stays clean
-        let proxyBaseURL = "http://localhost:4567"
+        var json = readClaudeSettings()
         var env = json["env"] as? [String: Any] ?? [:]
-        env["ANTHROPIC_BASE_URL"] = proxyBaseURL
+
+        env["ANTHROPIC_BASE_URL"] = "http://localhost:4567"
         env["ANTHROPIC_API_KEY"] = "legion"
         env["ANTHROPIC_AUTH_TOKEN"] = ""
         env["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"] = "1"
@@ -850,25 +849,23 @@ enum ClientConfigManager {
         json["env"] = env
         json["model"] = legionModel
 
-        guard let data = try? JSONSerialization.data(
-            withJSONObject: json,
-            options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-        ) else { return }
-
-        // Create parent directory if needed
-        let dir = (path as NSString).deletingLastPathComponent
-        try? fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        fm.createFile(atPath: path, contents: data)
+        writeClaudeSettings(json)
     }
 
     private static func restoreClaudeSettingsImpl() {
-        let fm = FileManager.default
-        let path = claudeSettingsPath
-        let backupPath = claudeSettingsBackupPath
+        var json = readClaudeSettings()
+        guard !json.isEmpty else { return }
 
-        guard fm.fileExists(atPath: backupPath) else { return }  // no-op if no backup
-        try? fm.removeItem(atPath: path)
-        try? fm.moveItem(atPath: backupPath, toPath: path)
+        var env = json["env"] as? [String: Any] ?? [:]
+        for key in proxyEnvKeys { env.removeValue(forKey: key) }
+        if env.isEmpty {
+            json.removeValue(forKey: "env")
+        } else {
+            json["env"] = env
+        }
+        json.removeValue(forKey: "model")
+
+        writeClaudeSettings(json)
     }
 
     // MARK: - Codex (~/.codex/config.toml)
