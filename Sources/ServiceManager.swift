@@ -828,19 +828,26 @@ enum ClientConfigManager {
             }
         }
 
-        // Patch env: set ANTHROPIC_BASE_URL, strip the real token and replace with a
-        // placeholder so Claude Code skips the login prompt (the proxy handles auth)
-        // Also set all default model envs to the LegionIO model so the user never has to
-        // pick one — it just works.
+        // Match the env var set that `legionio setup proxy-mode` writes to ~/.zsh_legionio:
+        // - Point Claude Code at the LegionIO proxy base URL (no /v1 suffix — Claude Code appends it)
+        // - Use a dummy API key so Claude Code skips the login prompt (the proxy handles auth)
+        // - Clear the real auth token so Anthropic direct auth doesn't kick in
+        // - Enable gateway model discovery so the legionio model appears in the picker
+        // - Clear Bedrock/AWS env vars that would override routing
+        // - Unset per-model default overrides so the picker stays clean
+        let proxyBaseURL = "http://localhost:4567"
         var env = json["env"] as? [String: Any] ?? [:]
-        env["ANTHROPIC_BASE_URL"] = daemonInferenceURL
-        env["ANTHROPIC_AUTH_TOKEN"] = "legionio"
-        env["CLAUDE_DEFAULT_MODEL"] = legionModel
-        env["ANTHROPIC_DEFAULT_OPUS_MODEL"] = legionModel
-        env["ANTHROPIC_DEFAULT_SONNET_MODEL"] = legionModel
-        env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = legionModel
+        env["ANTHROPIC_BASE_URL"] = proxyBaseURL
+        env["ANTHROPIC_API_KEY"] = "legion"
+        env["ANTHROPIC_AUTH_TOKEN"] = ""
+        env["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"] = "1"
+        env["CLAUDE_CODE_USE_BEDROCK"] = ""
+        env["AWS_PROFILE"] = ""
+        env["AWS_REGION"] = ""
+        env.removeValue(forKey: "ANTHROPIC_DEFAULT_OPUS_MODEL")
+        env.removeValue(forKey: "ANTHROPIC_DEFAULT_SONNET_MODEL")
+        env.removeValue(forKey: "ANTHROPIC_DEFAULT_HAIKU_MODEL")
         json["env"] = env
-        json["model"] = legionModel
 
         guard let data = try? JSONSerialization.data(
             withJSONObject: json,
