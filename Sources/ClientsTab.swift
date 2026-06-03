@@ -292,10 +292,22 @@ struct ClientsTab: View {
     // MARK: - Routing State Persistence (~/.legionio/settings/interlink.json)
 
     private func loadRoutingState() {
-        guard let json = SettingsFile.read("interlink") else { return }
+        let json = SettingsFile.read("interlink") ?? [:]
         if let claude = json["clientRouting.claude"] as? Bool { claudeRoutingEnabled = claude }
-        if let codex  = json["clientRouting.codex"]  as? Bool { codexRoutingEnabled  = codex  }
         if let kai    = json["clientRouting.kai"]    as? Bool { kaiRoutingEnabled    = kai    }
+
+        // Codex: read config.toml directly as source of truth — covers both Interlink
+        // toggles and `legionio setup proxy-mode` which writes the file independently.
+        let codexConfigPath = (FileManager.default.homeDirectoryForCurrentUser.path as NSString)
+            .appendingPathComponent(".codex/config.toml")
+        if let content = try? String(contentsOfFile: codexConfigPath, encoding: .utf8) {
+            codexRoutingEnabled = content.range(
+                of: #"(?m)^\s*profile\s*=\s*"legionio""#,
+                options: .regularExpression
+            ) != nil
+        } else {
+            codexRoutingEnabled = json["clientRouting.codex"] as? Bool ?? false
+        }
     }
 
     private func saveRoutingState() {
