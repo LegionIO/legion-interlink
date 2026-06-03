@@ -795,11 +795,11 @@ enum ClientConfigManager {
     /// Restore only Codex's config.toml.
     static func restoreCodexConfig() { restoreCodexConfigImpl() }
 
-    /// Patch only Kai's config.toml.
-    static func applyKaiConfig() { patchKaiConfigImpl() }
+    /// Patch Kai's desktop.json to route inference through LegionIO.
+    static func applyKaiConfig() { patchKaiDesktopImpl() }
 
-    /// Restore only Kai's config.toml.
-    static func restoreKaiConfig() { restoreKaiConfigImpl() }
+    /// Restore Kai's desktop.json from backup.
+    static func restoreKaiConfig() { restoreKaiDesktopImpl() }
 
     // MARK: - Claude Code (~/.claude/settings.json)
 
@@ -912,85 +912,127 @@ enum ClientConfigManager {
         fm.createFile(atPath: path, contents: toml.data(using: .utf8))
     }
 
-    // MARK: - Kai (~/.kai/config.toml)
+    // MARK: - Kai (~/.kai/settings/desktop.json + llm.json)
+    //
+    // Kai Desktop is an Electron app. It reads ~/.kai/settings/desktop.json as its
+    // primary config (deep-merged with defaults in readEffectiveConfig()). The
+    // ~/.kai/config.toml path does not exist and would be silently ignored.
+    //
+    // loadAppModelsConfig() in config.ts also reads llm.json and its `default_model`
+    // takes precedence over desktop.json's `defaultModelKey` when a matching catalog
+    // entry exists — so we patch both files.
 
-    private static var kaiConfigPath: String { "\(home)/.kai/config.toml" }
-    private static var kaiConfigBackupPath: String { "\(home)/.kai/config.toml.legionio-backup" }
+    private static var kaiDesktopPath: String { "\(home)/.kai/settings/desktop.json" }
+    private static var kaiDesktopBackupPath: String { "\(home)/.kai/settings/desktop.json.legionio-backup" }
+    private static var kaiLlmPath: String { "\(home)/.kai/settings/llm.json" }
+    private static var kaiLlmBackupPath: String { "\(home)/.kai/settings/llm.json.legionio-backup" }
 
-    private static func patchKaiConfigImpl() {
+    private static func patchKaiDesktopImpl() {
         let fm = FileManager.default
-        let path = kaiConfigPath
-        let backupPath = kaiConfigBackupPath
+        let path = kaiDesktopPath
+        let backupPath = kaiDesktopBackupPath
 
-        // Only back up once per session
-        if !fm.fileExists(atPath: backupPath) {
-            if fm.fileExists(atPath: path) {
-                try? fm.copyItem(atPath: path, toPath: backupPath)
-            }
+        // Backup original if not yet done
+        if !fm.fileExists(atPath: backupPath), fm.fileExists(atPath: path) {
+            try? fm.copyItem(atPath: path, toPath: backupPath)
         }
 
-        // Read existing TOML (or start fresh)
-        var toml = ""
+        // Read current desktop.json (start with empty dict if missing)
+        var json: [String: Any] = [:]
         if let data = fm.contents(atPath: path),
-           let str = String(data: data, encoding: .utf8) {
-            toml = str
+           let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            json = parsed
         }
 
-        // 1. Replace or append the top-level model_provider assignment
-        let providerLine = "model_provider = \"legionio\""
-        if let range = toml.range(of: #"(?m)^model_provider\s*=\s*"[^"]*""#, options: .regularExpression) {
-            toml.replaceSubrange(range, with: providerLine)
-        } else {
-            // Prepend at the top (before any section headers)
-            toml = providerLine + "\n" + toml
-        }
+        // Set agent runtime to "legionio"
+        var agent = json["agent"] as? [String: Any] ?? [:]
+        agent["runtime"] = "legionio"
+        json["agent"] = agent
 
-        // 2. Replace or append the top-level model assignment
-        let modelLine = "model = \"\(legionModel)\""
-        if let range = toml.range(of: #"(?m)^model\s*=\s*"[^"]*""#, options: .regularExpression) {
-            toml.replaceSubrange(range, with: modelLine)
-        } else if let range = toml.range(of: #"(?m)^#model\s*=\s*"[^"]*""#, options: .regularExpression) {
-            toml.replaceSubrange(range, with: modelLine)
-        } else {
-            toml += "\n" + modelLine
-        }
+        // Set legionio providers + defaultModelKey
+        var models = json["models"] as? [String: Any] ?? [:]
+        var providers = models["providers"] as? [String: Any] ?? [:]
+        providers["legionio"] = [
+            "type": "openai-compatible",
+            // @ai-sdk/openai appends /chat/completions to baseURL, so /v1 must be included.
+            "endpoint": "http://127.0.0.1:4567/api/llm/inference/v1",
+            "apiKey": "legionio-daemon",
+            "useResponsesApi": false,
+            "extraHeaders": [
+                "X-Legion-Client-Tool-Passthrough": "true",
+                "X-Legion-Include-Reasoning": "true"
+            ] as [String: String]
+        ] as [String: Any]
+        models["providers"] = providers
+        models["defaultModelKey"] = "legionio"
 
-        // 3. Append the [model_providers.legionio] block if not already present
-        let providerBlock = "\n[model_providers.legionio]\nname = \"LegionIO\"\nbase_url = \"\(daemonInferenceURL)\"\nwire_api = \"responses\"\n"
-        if !toml.contains("[model_providers.legionio]") {
-            toml += providerBlock
-        } else {
-            // Update the base_url line inside the existing block
-            let updatedURL = "base_url = \"\(daemonInferenceURL)\""
-            if let range = toml.range(
-                of: #"(?m)(^\[model_providers\.legionio\][\s\S]*?^base_url\s*=\s*)"[^"]*""#,
-                options: .regularExpression
-            ) {
-                // Replace just the base_url value inside the block
-                let block = String(toml[range])
-                if let urlRange = block.range(of: #"base_url\s*=\s*"[^"]*""#, options: .regularExpression) {
-                    var mutableBlock = block
-                    mutableBlock.replaceSubrange(urlRange, with: updatedURL)
-                    toml.replaceSubrange(range, with: mutableBlock)
-                }
-            }
-        }
+        // Upsert the legionio catalog entry — remove any stale entry (e.g. from the
+        // old plugin which incorrectly set provider: "bedrock") and prepend a correct one.
+        let legionioEntry: [String: Any] = [
+            "key":         "legionio",
+            "displayName": "LegionIO",
+            "provider":    "legionio",
+            "modelName":   "legionio"
+        ]
+        var catalog = (models["catalog"] as? [[String: Any]] ?? [])
+            .filter { ($0["key"] as? String) != "legionio" }
+        catalog.insert(legionioEntry, at: 0)
+        models["catalog"] = catalog
 
-        guard let data = toml.data(using: .utf8) else { return }
+        json["models"] = models
 
+        // Ensure the settings directory exists
         let dir = (path as NSString).deletingLastPathComponent
         try? fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
+
+        guard let data = try? JSONSerialization.data(
+            withJSONObject: json,
+            options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        ) else { return }
         fm.createFile(atPath: path, contents: data)
+
+        // Patch llm.json: loadAppModelsConfig() prefers llm.json's default_model over
+        // desktop.json's defaultModelKey when a matching catalog entry exists. Set it to
+        // "legionio" so Kai resolves the correct provider rather than whatever model the
+        // user had previously selected (e.g. "gpt-5.4").
+        let llmPath = kaiLlmPath
+        let llmBackupPath = kaiLlmBackupPath
+        if !fm.fileExists(atPath: llmBackupPath), fm.fileExists(atPath: llmPath) {
+            try? fm.copyItem(atPath: llmPath, toPath: llmBackupPath)
+        }
+        var llmJson: [String: Any] = [:]
+        if let llmData = fm.contents(atPath: llmPath),
+           let llmParsed = try? JSONSerialization.jsonObject(with: llmData) as? [String: Any] {
+            llmJson = llmParsed
+        }
+        var llmInner = llmJson["llm"] as? [String: Any] ?? [:]
+        llmInner["default_model"] = "legionio"
+        llmInner["default_provider"] = "legionio"
+        llmJson["llm"] = llmInner
+        if let llmData = try? JSONSerialization.data(
+            withJSONObject: llmJson,
+            options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        ) {
+            fm.createFile(atPath: llmPath, contents: llmData)
+        }
     }
 
-    private static func restoreKaiConfigImpl() {
+    private static func restoreKaiDesktopImpl() {
         let fm = FileManager.default
-        let path = kaiConfigPath
-        let backupPath = kaiConfigBackupPath
 
-        guard fm.fileExists(atPath: backupPath) else { return }  // no-op if no backup
-        try? fm.removeItem(atPath: path)
-        try? fm.moveItem(atPath: backupPath, toPath: path)
+        let path = kaiDesktopPath
+        let backupPath = kaiDesktopBackupPath
+        if fm.fileExists(atPath: backupPath) {
+            try? fm.removeItem(atPath: path)
+            try? fm.moveItem(atPath: backupPath, toPath: path)
+        }
+
+        let llmPath = kaiLlmPath
+        let llmBackupPath = kaiLlmBackupPath
+        if fm.fileExists(atPath: llmBackupPath) {
+            try? fm.removeItem(atPath: llmPath)
+            try? fm.moveItem(atPath: llmBackupPath, toPath: llmPath)
+        }
     }
 
 }

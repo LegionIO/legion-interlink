@@ -1,13 +1,19 @@
 # Changelog
 
-## [2.3.2] - 2026-06-02
+## [2.3.3] - 2026-06-02
 
 ### Changed
 - **Codex routing is profile-based** — Interlink now only toggles `profile = "legionio"` in `~/.codex/config.toml` rather than injecting an inline provider block. Full provider config is owned by `legionio setup proxy-mode`. Removes backup/restore cycle for Codex; the profile line is simply added or removed.
 - **Native button is now cyan** — The "native" side of the routing toggle uses cyan (`#40D1E0`) when selected, matching the same filled-with-dark-text pattern as the LegionIO/accent side. Border also turns cyan when native is active. Previously the native selection was nearly invisible against the dark background.
+- **Codex routing state reads config.toml directly** — Toggle reflects actual file state on load; `legionio setup proxy-mode` and Interlink stay in sync automatically.
 
 ### Fixed
 - **Daemon status when running via `bundle exec`** — Interlink previously required brew services to confirm the daemon was running, so manually launched daemons (`bundle exec exe/legionio start`) showed as OFFLINE even with a live API. Now the HTTP health check (`/api/ready`) is authoritative: if the endpoint responds, the daemon is online regardless of brew's knowledge of the process.
+
+## [2.3.2] - 2026-05-29
+
+### Fixed
+- **Kai routing patches correct config file** — Replaced `~/.kai/config.toml` approach (not read by Kai Desktop) with `~/.kai/settings/desktop.json` + `~/.kai/settings/llm.json`. The patch sets `agent.runtime = "legionio"`, registers the `legionio` openai-compatible provider at `http://127.0.0.1:4567/api/llm/inference/v1`, upserts the `legionio` model catalog entry with `provider: "legionio"` (removing any stale entry from prior plugin installs), and sets `defaultModelKey = "legionio"`. Also patches `llm.json` `default_model` / `default_provider` so Kai's config loader resolves the correct model. Both files are backed up before patching and fully restored on toggle-off.
 
 ## [2.3.1] - 2026-05-29
 
