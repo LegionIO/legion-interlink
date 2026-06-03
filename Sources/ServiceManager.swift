@@ -275,7 +275,9 @@ class ServiceManager: ObservableObject {
             let result = serviceMap[service.brewName] ?? (running: false, pid: nil)
             if service == .legionio {
                 daemonReadiness = daemonHealth.readiness
-                let daemonOnline = result.running && daemonHealth.responding
+                // Consider the daemon online if brew reports it running OR if the HTTP
+                // health endpoint responds — covers `bundle exec exe/legionio start` in dev.
+                let daemonOnline = daemonHealth.responding || result.running
                 updateServiceIfStable(.legionio, daemonOnline ? .running : .stopped, pid: result.pid)
             } else {
                 updateServiceIfStable(service, result.running ? .running : .stopped, pid: result.pid)
@@ -862,93 +864,52 @@ enum ClientConfigManager {
     }
 
     // MARK: - Codex (~/.codex/config.toml)
+    // Interlink only manages the `profile` key. The full provider config is written by
+    // `legionio setup proxy-mode` into legionio.config.toml — we just switch the active profile.
 
     private static var codexConfigPath: String { "\(home)/.codex/config.toml" }
-    private static var codexConfigBackupPath: String { "\(home)/.codex/config.toml.legionio-backup" }
-
-    private static let legionProviderBlock = """
-
-[model_providers.legionio]
-name = "LegionIO"
-base_url = "\(daemonInferenceURL)"
-wire_api = "responses"
-"""
-
-    private static let legionModelLine = "model = \"\(legionModel)\""
 
     private static func patchCodexConfigImpl() {
         let fm = FileManager.default
         let path = codexConfigPath
-        let backupPath = codexConfigBackupPath
+        let profileLine = "profile = \"legionio\""
 
-        // Only back up once per session
-        if !fm.fileExists(atPath: backupPath) {
-            if fm.fileExists(atPath: path) {
-                try? fm.copyItem(atPath: path, toPath: backupPath)
-            }
-        }
-
-        // Read existing TOML (or start fresh)
         var toml = ""
         if let data = fm.contents(atPath: path),
            let str = String(data: data, encoding: .utf8) {
             toml = str
         }
 
-        // 1. Replace or append the top-level model_provider assignment
-        let providerLine = "model_provider = \"legionio\""
-        if let range = toml.range(of: #"(?m)^model_provider\s*=\s*"[^"]*""#, options: .regularExpression) {
-            toml.replaceSubrange(range, with: providerLine)
-        } else {
-            // Prepend at the top (before any section headers)
-            toml = providerLine + "\n" + toml
+        if toml.range(of: #"(?m)^\s*profile\s*=\s*"legionio""#, options: .regularExpression) != nil {
+            return  // already set
         }
 
-        // 2. Replace or append the top-level model assignment
-        if let range = toml.range(of: #"(?m)^model\s*=\s*"[^"]*""#, options: .regularExpression) {
-            toml.replaceSubrange(range, with: legionModelLine)
-        } else if let range = toml.range(of: #"(?m)^#model\s*=\s*"[^"]*""#, options: .regularExpression) {
-            toml.replaceSubrange(range, with: legionModelLine)
+        if let range = toml.range(of: #"(?m)^\s*profile\s*=\s*"[^"]*""#, options: .regularExpression) {
+            toml.replaceSubrange(range, with: profileLine)
         } else {
-            // Append after provider line
-            toml += "\n" + legionModelLine
+            toml = toml.isEmpty ? profileLine + "\n" : profileLine + "\n\n" + toml.trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
         }
-
-        // 3. Append the [model_providers.legionio] block if not already present
-        if !toml.contains("[model_providers.legionio]") {
-            toml += legionProviderBlock
-        } else {
-            // Update the base_url line inside the existing block
-            let updatedURL = "base_url = \"\(daemonInferenceURL)\""
-            if let range = toml.range(
-                of: #"(?m)(^\[model_providers\.legionio\][\s\S]*?^base_url\s*=\s*)"[^"]*""#,
-                options: .regularExpression
-            ) {
-                // Replace just the base_url value inside the block
-                let block = String(toml[range])
-                if let urlRange = block.range(of: #"base_url\s*=\s*"[^"]*""#, options: .regularExpression) {
-                    var mutableBlock = block
-                    mutableBlock.replaceSubrange(urlRange, with: updatedURL)
-                    toml.replaceSubrange(range, with: mutableBlock)
-                }
-            }
-        }
-
-        guard let data = toml.data(using: .utf8) else { return }
 
         let dir = (path as NSString).deletingLastPathComponent
         try? fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        fm.createFile(atPath: path, contents: data)
+        fm.createFile(atPath: path, contents: toml.data(using: .utf8))
     }
 
     private static func restoreCodexConfigImpl() {
         let fm = FileManager.default
         let path = codexConfigPath
-        let backupPath = codexConfigBackupPath
 
-        guard fm.fileExists(atPath: backupPath) else { return }  // no-op if no backup
-        try? fm.removeItem(atPath: path)
-        try? fm.moveItem(atPath: backupPath, toPath: path)
+        guard let data = fm.contents(atPath: path),
+              var toml = String(data: data, encoding: .utf8) else { return }
+
+        // Remove the profile = "legionio" line (and any immediately following blank line)
+        toml = toml.replacingOccurrences(
+            of: #"(?m)^\s*profile\s*=\s*"legionio"\n(\n)?"#,
+            with: "",
+            options: .regularExpression
+        )
+
+        fm.createFile(atPath: path, contents: toml.data(using: .utf8))
     }
 
     // MARK: - Kai (~/.kai/config.toml)
@@ -985,18 +946,19 @@ wire_api = "responses"
         }
 
         // 2. Replace or append the top-level model assignment
+        let modelLine = "model = \"\(legionModel)\""
         if let range = toml.range(of: #"(?m)^model\s*=\s*"[^"]*""#, options: .regularExpression) {
-            toml.replaceSubrange(range, with: legionModelLine)
+            toml.replaceSubrange(range, with: modelLine)
         } else if let range = toml.range(of: #"(?m)^#model\s*=\s*"[^"]*""#, options: .regularExpression) {
-            toml.replaceSubrange(range, with: legionModelLine)
+            toml.replaceSubrange(range, with: modelLine)
         } else {
-            // Append after provider line
-            toml += "\n" + legionModelLine
+            toml += "\n" + modelLine
         }
 
         // 3. Append the [model_providers.legionio] block if not already present
+        let providerBlock = "\n[model_providers.legionio]\nname = \"LegionIO\"\nbase_url = \"\(daemonInferenceURL)\"\nwire_api = \"responses\"\n"
         if !toml.contains("[model_providers.legionio]") {
-            toml += legionProviderBlock
+            toml += providerBlock
         } else {
             // Update the base_url line inside the existing block
             let updatedURL = "base_url = \"\(daemonInferenceURL)\""

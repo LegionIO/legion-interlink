@@ -267,10 +267,10 @@ struct ClientsTab: View {
                     Text("native")
                         .font(.system(size: 9, weight: .semibold, design: .monospaced))
                 }
-                .foregroundColor(!active ? TerminalTheme.text : TerminalTheme.textDim)
+                .foregroundColor(!active ? TerminalTheme.bg : TerminalTheme.textDim)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
-                .background(!active ? TerminalTheme.surfaceBg : Color.clear)
+                .background(!active ? TerminalTheme.cyan : Color.clear)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -279,7 +279,7 @@ struct ClientsTab: View {
         .background(TerminalTheme.cardBg)
         .overlay(
             RoundedRectangle(cornerRadius: 5)
-                .stroke(active ? TerminalTheme.accent.opacity(0.4) : TerminalTheme.border, lineWidth: 1)
+                .stroke(active ? TerminalTheme.accent.opacity(0.4) : TerminalTheme.cyan.opacity(0.4), lineWidth: 1)
         )
         .cornerRadius(5)
         .disabled(!daemonOnline)

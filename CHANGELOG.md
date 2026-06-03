@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.3.2] - 2026-06-02
+
+### Changed
+- **Codex routing is profile-based** — Interlink now only toggles `profile = "legionio"` in `~/.codex/config.toml` rather than injecting an inline provider block. Full provider config is owned by `legionio setup proxy-mode`. Removes backup/restore cycle for Codex; the profile line is simply added or removed.
+- **Native button is now cyan** — The "native" side of the routing toggle uses cyan (`#40D1E0`) when selected, matching the same filled-with-dark-text pattern as the LegionIO/accent side. Border also turns cyan when native is active. Previously the native selection was nearly invisible against the dark background.
+
+### Fixed
+- **Daemon status when running via `bundle exec`** — Interlink previously required brew services to confirm the daemon was running, so manually launched daemons (`bundle exec exe/legionio start`) showed as OFFLINE even with a live API. Now the HTTP health check (`/api/ready`) is authoritative: if the endpoint responds, the daemon is online regardless of brew's knowledge of the process.
+
 ## [2.3.1] - 2026-05-29
 
 ### Added
