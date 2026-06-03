@@ -1,5 +1,10 @@
 # Changelog
 
+## [2.3.4] - 2026-06-02
+
+### Changed
+- **Codex routing uses `model` + `model_provider` instead of `profile`** — `applyCodexConfig` and `restoreCodexConfig` now write/clear `model = "legionio"` and `model_provider = "legionio"` at the top of `~/.codex/config.toml` rather than toggling a `profile = "legionio"` line. Support for the `profile` key was removed from Codex. `loadRoutingState` detects active routing by reading `model_provider` directly from config.toml.
+
 ## [2.3.3] - 2026-06-02
 
 ### Changed
