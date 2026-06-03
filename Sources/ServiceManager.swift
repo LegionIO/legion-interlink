@@ -774,13 +774,11 @@ enum ClientConfigManager {
     /// Patch all client configs to route inference through LegionIO.
     static func applyLegionIOConfigs() {
         patchClaudeSettingsImpl()
-        patchCodexConfigImpl()
     }
 
     /// Restore all original client configs from backups.
     static func restoreOriginalConfigs() {
         restoreClaudeSettingsImpl()
-        restoreCodexConfigImpl()
     }
 
     /// Patch only Claude Code's settings.json.
@@ -788,12 +786,6 @@ enum ClientConfigManager {
 
     /// Restore only Claude Code's settings.json.
     static func restoreClaudeConfig() { restoreClaudeSettingsImpl() }
-
-    /// Patch only Codex's config.toml.
-    static func applyCodexConfig() { patchCodexConfigImpl() }
-
-    /// Restore only Codex's config.toml.
-    static func restoreCodexConfig() { restoreCodexConfigImpl() }
 
     /// Patch Kai's desktop.json to route inference through LegionIO.
     static func applyKaiConfig() { patchKaiDesktopImpl() }
@@ -869,52 +861,50 @@ enum ClientConfigManager {
     }
 
     // MARK: - Codex (~/.codex/config.toml)
-    // Interlink only manages the `profile` key. The full provider config is written by
-    // `legionio setup proxy-mode` into legionio.config.toml — we just switch the active profile.
+    // `setup proxy-mode` writes legionio.config.toml + the [model_providers.legionio] block
+    // into config.toml so the provider appears in the model picker (CLI and Mac app).
+    // Interlink's toggle only sets/clears the top-level `model` and `model_provider` keys
+    // to make LegionIO the active default — it does not touch the provider block.
 
+    static var codexProfileConfigPath: String { "\(home)/.codex/legionio.config.toml" }
     private static var codexConfigPath: String { "\(home)/.codex/config.toml" }
 
-    private static func patchCodexConfigImpl() {
-        let fm = FileManager.default
+    static func applyCodexConfig() {
         let path = codexConfigPath
-        let profileLine = "profile = \"legionio\""
-
-        var toml = ""
-        if let data = fm.contents(atPath: path),
-           let str = String(data: data, encoding: .utf8) {
-            toml = str
-        }
-
-        if toml.range(of: #"(?m)^\s*profile\s*=\s*"legionio""#, options: .regularExpression) != nil {
-            return  // already set
-        }
-
-        if let range = toml.range(of: #"(?m)^\s*profile\s*=\s*"[^"]*""#, options: .regularExpression) {
-            toml.replaceSubrange(range, with: profileLine)
-        } else {
-            toml = toml.isEmpty ? profileLine + "\n" : profileLine + "\n\n" + toml.trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
-        }
-
-        let dir = (path as NSString).deletingLastPathComponent
-        try? fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        fm.createFile(atPath: path, contents: toml.data(using: .utf8))
-    }
-
-    private static func restoreCodexConfigImpl() {
-        let fm = FileManager.default
-        let path = codexConfigPath
-
-        guard let data = fm.contents(atPath: path),
+        guard let data = FileManager.default.contents(atPath: path),
               var toml = String(data: data, encoding: .utf8) else { return }
 
-        // Remove the profile = "legionio" line (and any immediately following blank line)
-        toml = toml.replacingOccurrences(
-            of: #"(?m)^\s*profile\s*=\s*"legionio"\n(\n)?"#,
-            with: "",
-            options: .regularExpression
-        )
+        let modelLine     = "model = \"\(legionModel)\""
+        let providerLine  = "model_provider = \"\(legionModel)\""
 
-        fm.createFile(atPath: path, contents: toml.data(using: .utf8))
+        if toml.range(of: #"(?m)^model\s*=\s*"[^"]*""#, options: .regularExpression) != nil {
+            toml = toml.replacingOccurrences(of: #"(?m)^model\s*=\s*"[^"]*""#,
+                                             with: modelLine, options: .regularExpression)
+        } else {
+            toml = modelLine + "\n" + toml
+        }
+
+        if toml.range(of: #"(?m)^model_provider\s*=\s*"[^"]*""#, options: .regularExpression) != nil {
+            toml = toml.replacingOccurrences(of: #"(?m)^model_provider\s*=\s*"[^"]*""#,
+                                             with: providerLine, options: .regularExpression)
+        } else {
+            toml = providerLine + "\n" + toml
+        }
+
+        FileManager.default.createFile(atPath: path, contents: toml.data(using: .utf8))
+    }
+
+    static func restoreCodexConfig() {
+        let path = codexConfigPath
+        guard let data = FileManager.default.contents(atPath: path),
+              var toml = String(data: data, encoding: .utf8) else { return }
+
+        toml = toml.replacingOccurrences(
+            of: #"(?m)^model\s*=\s*"legionio"\n?"#, with: "", options: .regularExpression)
+        toml = toml.replacingOccurrences(
+            of: #"(?m)^model_provider\s*=\s*"legionio"\n?"#, with: "", options: .regularExpression)
+
+        FileManager.default.createFile(atPath: path, contents: toml.data(using: .utf8))
     }
 
     // MARK: - Kai (~/.kai/settings/desktop.json + llm.json)

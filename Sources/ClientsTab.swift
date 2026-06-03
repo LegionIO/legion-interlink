@@ -296,13 +296,14 @@ struct ClientsTab: View {
         if let claude = json["clientRouting.claude"] as? Bool { claudeRoutingEnabled = claude }
         if let kai    = json["clientRouting.kai"]    as? Bool { kaiRoutingEnabled    = kai    }
 
-        // Codex: read config.toml directly as source of truth — covers both Interlink
-        // toggles and `legionio setup proxy-mode` which writes the file independently.
+        // Codex: routing is active when config.toml has model_provider = "legionio" set,
+        // which means Interlink's toggle is on. The provider block is written by
+        // `legionio setup proxy-mode` and is a prerequisite but not the routing signal.
         let codexConfigPath = (FileManager.default.homeDirectoryForCurrentUser.path as NSString)
             .appendingPathComponent(".codex/config.toml")
         if let content = try? String(contentsOfFile: codexConfigPath, encoding: .utf8) {
             codexRoutingEnabled = content.range(
-                of: #"(?m)^\s*profile\s*=\s*"legionio""#,
+                of: #"(?m)^model_provider\s*=\s*"legionio""#,
                 options: .regularExpression
             ) != nil
         } else {
