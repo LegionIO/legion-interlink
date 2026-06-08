@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.3.5] - 2026-06-03
+
+### Added
+- **Self-update for the Interlink cask** — The Updates tab now checks GitHub releases for a newer Interlink version alongside gem updates. When an update is available, `brew upgrade legion-interlink` runs and the app relaunches automatically.
+- **External upgrade detection** — A 5-minute background timer checks Homebrew's Cellar for a newer Interlink binary on disk (e.g. from `brew upgrade legion-interlink` in Terminal). Shows a notification and relaunches if found.
+- **Notification permission requested at startup** — Prevents macOS from silently dropping update notifications. Persistent/time-sensitive interruption level on macOS 15+.
+
+### Changed
+- **Core items section filters to gems only** — The "CORE" section in the Updates tab no longer shows cask entries alongside gems. Interlink updates appear in the "OTHER" section with a "cask" badge.
+
+### Fixed
+- **UpdatesTab syntax error** — Malformed `if` statements in the update card view (zero indentation, blank line between `if` and body) caused a compilation failure. Fixed with proper indentation and structure.
+- **Codex profile cleanup** — `restoreCodexConfig` now also strips `profile = "legionio"` lines from `config.toml`, preventing stale profile references after routing changes.
+- **Homebrew Cellar path for Intel Macs** — `diskVersion()` now checks both `/opt/homebrew/Cellar` (Apple Silicon) and `/usr/local/Cellar` (Intel).
+
 ## [2.3.4] - 2026-06-02
 
 ### Changed

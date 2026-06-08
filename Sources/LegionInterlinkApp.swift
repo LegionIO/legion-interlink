@@ -41,6 +41,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
     private static let windowFrameKey = "StatusWindowFrame"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Request notification permission at startup so update alerts are never silently dropped
+        Task { @MainActor in
+            try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound])
+        }
+
         // Menu bar only — hide from Dock
         NSApplication.shared.setActivationPolicy(.accessory)
 
@@ -181,10 +186,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDele
     }
 
     private static func diskVersion() -> String {
-        let cellarPath = "/opt/homebrew/Cellar/legion-interlink"
-        if let contents = try? FileManager.default.contentsOfDirectory(atPath: cellarPath) {
-            let versions = contents.filter { !$0.hasPrefix(".") }.sorted()
-            if let latest = versions.last { return latest }
+        for cellarPath in ["/opt/homebrew/Cellar/legion-interlink",
+                           "/usr/local/Cellar/legion-interlink"] {
+            if let contents = try? FileManager.default.contentsOfDirectory(atPath: cellarPath) {
+                let versions = contents.filter { !$0.hasPrefix(".") }.sorted()
+                if let latest = versions.last { return latest }
+            }
         }
         return ""
     }

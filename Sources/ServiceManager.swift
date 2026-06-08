@@ -903,6 +903,8 @@ enum ClientConfigManager {
             of: #"(?m)^model\s*=\s*"legionio"\n?"#, with: "", options: .regularExpression)
         toml = toml.replacingOccurrences(
             of: #"(?m)^model_provider\s*=\s*"legionio"\n?"#, with: "", options: .regularExpression)
+        toml = toml.replacingOccurrences(
+            of: #"(?m)^profile\s*=\s*"legionio"\n?"#, with: "", options: .regularExpression)
 
         FileManager.default.createFile(atPath: path, contents: toml.data(using: .utf8))
     }

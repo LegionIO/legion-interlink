@@ -5,6 +5,7 @@ import SwiftUI
 struct UpdateItem: Identifiable {
     enum Source: String {
         case gem = "gem"
+        case cask = "cask"
     }
 
     let id: String
@@ -15,8 +16,9 @@ struct UpdateItem: Identifiable {
     var isUpdating: Bool = false
 
     var isLex: Bool { name.hasPrefix("lex-") }
-    var isCoreLibrary: Bool { name.hasPrefix("legion-") || name == "legionio" }
+    var isCoreLibrary: Bool { name.hasPrefix("legion-") || name == "legionio" || name == "legion-interlink" }
     var isLegionio: Bool { name == "legionio" }
+    var isInterlink: Bool { name == "legion-interlink" }
 }
 
 @MainActor
@@ -33,6 +35,7 @@ class UpdateManager: ObservableObject {
     private let resolvedBrewPath: String
     private let resolvedLegionGemPath: String
     private var backgroundTimer: Timer?
+    private var diskVersionTimer: Timer?
 
     private init() {
         resolvedBrewPath = Self.findPath("/opt/homebrew/bin/brew", fallback: "/usr/local/bin/brew")
@@ -62,18 +65,20 @@ class UpdateManager: ObservableObject {
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
+        content.sound = .default
+        // Persistent notification — user must dismiss it explicitly.
+        #if compiler(>=6.0)
+            if #available(macOS 15.0, *) {
+                content.interruptionLevel = .timeSensitive
+            }
+        #endif
 
         let request = UNNotificationRequest(
             identifier: UUID().uuidString,
             content: content,
             trigger: nil
         )
-        DispatchQueue.main.async {
-            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge]) { granted, _ in
-                guard granted else { return }
-                UNUserNotificationCenter.current().add(request)
-            }
-        }
+        UNUserNotificationCenter.current().add(request)
     }
 
     // MARK: - Background Periodic Check
@@ -84,6 +89,49 @@ class UpdateManager: ObservableObject {
             Task { @MainActor in
                 await self.checkForUpdates(force: true, background: true)
             }
+        }
+
+        // Every 5 minutes, check if `brew upgrade legion-interlink` replaced the binary on disk
+        diskVersionTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            self.checkDiskVersionAndRelaunch()
+        }
+    }
+
+    /// Detects when an external `brew upgrade legion-interlink` replaced the binary on disk.
+    /// Shows a notification and relaunches the app automatically.
+    private nonisolated func checkDiskVersionAndRelaunch() {
+        let runningVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
+        let diskVersion = Self.diskVersion()
+        guard !runningVersion.isEmpty, !diskVersion.isEmpty,
+              diskVersion != runningVersion else { return }
+
+        // Only relaunch once per version bump to avoid loops
+        let key = "InterlinkLastRelaunchVersion"
+        let lastNotified = UserDefaults.standard.string(forKey: key) ?? ""
+        guard lastNotified != diskVersion else { return }
+        UserDefaults.standard.set(diskVersion, forKey: key)
+
+        let content = UNMutableNotificationContent()
+        content.title = "Legion Interlink"
+        content.body = "Updated to \(diskVersion). Restarting..."
+        content.sound = .default
+        let request = UNNotificationRequest(
+            identifier: "disk-upgrade-\(UUID().uuidString)",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            let bundlePath = Bundle.main.bundlePath
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/sh")
+            process.arguments = ["-c", "sleep 1 && open '\(bundlePath)'"]
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            try? process.run()
+            NSApplication.shared.terminate(nil)
         }
     }
 
@@ -97,22 +145,32 @@ class UpdateManager: ObservableObject {
         checkError = nil
 
         let legionGem = resolvedLegionGemPath
-        let gemItems = await Self.checkGemOutdated(legionGem: legionGem)
+        async let gemItems = Self.checkGemOutdated(legionGem: legionGem)
+        async let caskItem = Self.checkCaskOutdated()
+
+        let allItems = await Array(gemItems) + (caskItem.map { [$0] } ?? [])
 
         let previousCount = items.count
-        items = gemItems
+        items = allItems
         hasChecked = true
         lastChecked = Date()
         isChecking = false
 
         if !items.isEmpty && items.count > previousCount {
-            let legionioCount = gemItems.filter(\.isLegionio).count
-            let coreCount = gemItems.filter { $0.isCoreLibrary && !$0.isLegionio }.count
+            let legionioCount = allItems.filter(\.isLegionio).count
+            let interlinkCount = allItems.filter(\.isInterlink).count
+            let coreCount = allItems.filter { $0.isCoreLibrary && !$0.isLegionio && !$0.isInterlink }.count
 
             if legionioCount > 0 {
                 sendNotification(
                     title: "LegionIO Update Available",
                     body: "A new version of legionio is available."
+                )
+            }
+            if interlinkCount > 0 {
+                sendNotification(
+                    title: "Legion Interlink Update Available",
+                    body: "A new version of Legion Interlink is available. Restart required."
                 )
             }
             if coreCount > 0 {
@@ -141,11 +199,17 @@ class UpdateManager: ObservableObject {
         let legionGem = resolvedLegionGemPath
         let name = item.name
         let isLegionio = item.isLegionio
+        let isInterlink = item.isInterlink
 
         Task.detached {
-            let success = Self.runSync(legionGem, arguments: ["update", name])
+            var success = false
+            if isInterlink {
+                success = Self.runSync(brew, arguments: ["upgrade", "legion-interlink"])
+            } else {
+                success = Self.runSync(legionGem, arguments: ["update", name])
+            }
 
-            // For legionio itself, also run brew upgrade to update the CLI binary
+            // For legionio gem, also run brew upgrade to update the CLI binary
             if success && isLegionio {
                 _ = Self.runSync(brew, arguments: ["upgrade", "legionio"])
             }
@@ -163,6 +227,25 @@ class UpdateManager: ObservableObject {
             if success && isLegionio {
                 await ServiceManager.shared.restartService(.legionio)
             }
+
+            // After interlink upgrade, quit — the AppDelegate or cask postflight
+            // will detect the new version and relaunch.
+            if success && isInterlink {
+                await Self.relaunchInterlink()
+            }
+        }
+    }
+
+    private nonisolated static func relaunchInterlink() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            let bundlePath = Bundle.main.bundlePath
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/sh")
+            process.arguments = ["-c", "sleep 1 && open '\(bundlePath)'"]
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            try? process.run()
+            NSApplication.shared.terminate(nil)
         }
     }
 
@@ -192,6 +275,45 @@ class UpdateManager: ObservableObject {
                 }
             }
         }
+    }
+
+    // MARK: - Cask Version Check (GitHub API)
+
+    /// Fetch the latest release tag from the Legion Interlink GitHub releases page.
+    /// Returns an UpdateItem if the running version is older than the latest release.
+    private nonisolated static func checkCaskOutdated() async -> UpdateItem? {
+        let url = URL(string: "https://api.github.com/repos/LegionIO/legion-interlink/releases/latest")!
+        do {
+            let (data, response) = try await URLSession.shared.data(from: url)
+            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+                return nil
+            }
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let tagName = json["tag_name"] as? String else {
+                return nil
+            }
+            // tag_name is like "v2.3.2"
+            let latestVersion = String(tagName.drop(while: { $0 == "v" }))
+
+            let runningVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
+            guard !runningVersion.isEmpty, latestVersion != runningVersion else {
+                return nil
+            }
+
+            // Only report if newer (numeric comparison handles semver well enough)
+            if latestVersion.compare(runningVersion, options: .numeric) == .orderedDescending {
+                return UpdateItem(
+                    id: "cask:legion-interlink",
+                    name: "legion-interlink",
+                    currentVersion: runningVersion,
+                    availableVersion: latestVersion,
+                    source: .cask
+                )
+            }
+        } catch {
+            // Network error or GitHub rate-limited — silently skip
+        }
+        return nil
     }
 
     // MARK: - Gem Parsing
@@ -245,6 +367,21 @@ class UpdateManager: ObservableObject {
         )
     }
 
+    // MARK: - Disk Version Detection
+
+    /// Returns the latest installed version from Homebrew's Cellar, or "" if not found.
+    /// Checks both Apple Silicon and Intel Homebrew paths.
+    private nonisolated static func diskVersion() -> String {
+        for cellarPath in ["/opt/homebrew/Cellar/legion-interlink",
+                           "/usr/local/Cellar/legion-interlink"] {
+            if let contents = try? FileManager.default.contentsOfDirectory(atPath: cellarPath) {
+                let versions = contents.filter { !$0.hasPrefix(".") }.sorted()
+                if let latest = versions.last { return latest }
+            }
+        }
+        return ""
+    }
+
     // MARK: - Process Helpers
 
     private nonisolated static func runSync(_ executable: String, arguments: [String]) -> Bool {
@@ -264,5 +401,6 @@ class UpdateManager: ObservableObject {
 
     deinit {
         backgroundTimer?.invalidate()
+        diskVersionTimer?.invalidate()
     }
 }
