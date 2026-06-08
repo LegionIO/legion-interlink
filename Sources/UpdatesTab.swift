@@ -36,7 +36,7 @@ struct UpdatesTab: View {
                 .foregroundColor(TerminalTheme.textDim)
 
             if updateManager.outdatedCount > 0 {
-                Text("\(updateManager.outdatedCount)")
+                Text("(updateManager.outdatedCount)")
                     .font(.system(size: 9, weight: .bold, design: .monospaced))
                     .foregroundColor(TerminalTheme.yellow)
                     .padding(.horizontal, 6)
@@ -131,7 +131,7 @@ struct UpdatesTab: View {
     private var updatesList: some View {
         ScrollView {
             VStack(spacing: 8) {
-                let coreItems = updateManager.items.filter(\.isCoreLibrary)
+                let coreItems = updateManager.items.filter { $0.isCoreLibrary && $0.source == .gem }
                 if !coreItems.isEmpty {
                     sectionHeader("CORE (legionio + legion-*)", icon: "cpu")
                     ForEach(coreItems) { item in
@@ -139,7 +139,7 @@ struct UpdatesTab: View {
                     }
                 }
 
-                let lexItems = updateManager.items.filter(\.isLex)
+                let lexItems = updateManager.items.filter { $0.isLex }
                 if !lexItems.isEmpty {
                     sectionHeader("EXTENSIONS (lex-*)", icon: "puzzlepiece.extension")
                     ForEach(lexItems) { item in
@@ -215,6 +215,17 @@ struct UpdatesTab: View {
                         .cornerRadius(3)
                 }
 
+                if item.isInterlink {
+                    Text("cask")
+                        .font(.system(size: 8, design: .monospaced))
+                        .foregroundColor(TerminalTheme.textDim)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(TerminalTheme.surfaceBg)
+                        .overlay(RoundedRectangle(cornerRadius: 3).stroke(TerminalTheme.border, lineWidth: 1))
+                        .cornerRadius(3)
+                }
+
                 if item.isUpdating {
                     ProgressView()
                         .controlSize(.mini)
@@ -253,7 +264,7 @@ struct UpdatesTab: View {
                 .font(.system(size: 13, weight: .medium, design: .monospaced))
                 .foregroundColor(TerminalTheme.text)
             if let lastChecked = updateManager.lastChecked {
-                Text("Checked \(lastChecked, style: .relative) ago")
+                Text("Checked (lastChecked, style: .relative) ago")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundColor(TerminalTheme.textDim.opacity(0.5))
             }
@@ -271,7 +282,7 @@ struct UpdatesTab: View {
             Text("Check for updates")
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundColor(TerminalTheme.textDim)
-            Text("Checks legionio, legion-*, and lex-* gems for updates")
+            Text("Checks legionio, legion-*, lex-* gems, and interlink cask")
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundColor(TerminalTheme.textDim.opacity(0.4))
             Spacer()
