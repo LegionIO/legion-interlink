@@ -139,7 +139,7 @@ struct UpdatesTab: View {
                     }
                 }
 
-                let lexItems = updateManager.items.filter(.isLex)
+                let lexItems = updateManager.items.filter { $0.isLex }
                 if !lexItems.isEmpty {
                     sectionHeader("EXTENSIONS (lex-*)", icon: "puzzlepiece.extension")
                     ForEach(lexItems) { item in
